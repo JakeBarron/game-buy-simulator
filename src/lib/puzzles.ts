@@ -1,4 +1,4 @@
-import { Puzzle, PuzzleKind } from './types';
+import type { Puzzle, PuzzleKind } from './types';
 
 /**
  * Picks a random element from an array using the injected rand function.

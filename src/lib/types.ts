@@ -73,6 +73,10 @@ export type Shift = {
   puzzleSolvedAt: number | null;
   /** Enables replaying death-while-away without tick history. */
   balanceAtStart: number;
+  /** Cumulative drain already subtracted from the balance. Makes drain
+   *  application independent of tick cadence, so a shift that advanced while
+   *  the tab was closed still charges for that time on the next tick. */
+  drainApplied: number;
 };
 
 // ---------------------------------------------------------------------------

@@ -1,7 +1,7 @@
 // Tuning constants for Game Buy Simulator.
 // See specs/001-game-buy-simulator/data-model.md for the reference values.
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 export const STARTING_HOURS = 1500;
 export const WORK_REQUIRED_MS = 45_000;
 /** Hours per ms of work-time at rest -> 270 hours per resting shift. */
