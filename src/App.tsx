@@ -18,6 +18,7 @@ import { LibraryView } from './components/LibraryView'
 import { HistoryView } from './components/HistoryView'
 import { AnnouncementStack } from './components/Announcement'
 import { EndScreen } from './components/EndScreen'
+import { Welcome } from './components/Welcome'
 
 // The run is replayed through one TICK before first render (research D6), so a
 // player returning to a closed tab sees the correct post-absence state rather
@@ -157,6 +158,16 @@ export default function App() {
         announcements={state.announcements}
         onDismiss={id => dispatch({ type: 'DISMISS_ANNOUNCEMENT', id })}
       />
+
+      {!state.welcomeSeen && state.status === 'playing' && (
+        <Welcome
+          startingHours={CONFIG.STARTING_HOURS}
+          restingCost={restingShiftCost(CONFIG)}
+          spacedCost={spacedShiftCost(CONFIG)}
+          wage={CONFIG.WAGE}
+          onDismiss={() => dispatch({ type: 'DISMISS_WELCOME' })}
+        />
+      )}
 
       {state.status !== 'playing' && (
         <EndScreen

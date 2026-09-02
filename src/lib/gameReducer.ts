@@ -71,6 +71,7 @@ export function initialRun(now: number, config: Config): RunState {
     nextSaleAt: now + rangeMid(config.SALE_INTERVAL_MS),
     nextReleaseAt: now + rangeMid(config.RELEASE_INTERVAL_MS),
     endedAt: null,
+    welcomeSeen: false,
     activeStorefrontId: STOREFRONTS[0].id,
     announcements: [],
   };
@@ -423,8 +424,14 @@ export function gameReducer(state: RunState, action: GameAction, config: Config)
       return dismissAnnouncement(state, action);
     case 'SET_STOREFRONT':
       return setStorefront(state, action);
+    case 'DISMISS_WELCOME':
+      return state.welcomeSeen ? state : { ...state, welcomeSeen: true };
+
     case 'RESTART':
-      return initialRun(action.now, config);
+      // Carry welcomeSeen across a restart: the player has already read the
+      // rules, and re-showing a wall of text every time they start another
+      // life would be tedious rather than atmospheric.
+      return { ...initialRun(action.now, config), welcomeSeen: state.welcomeSeen };
     default: {
       const exhaustive: never = action;
       return exhaustive;

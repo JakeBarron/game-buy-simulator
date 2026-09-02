@@ -19,6 +19,8 @@ export type Storefront = {
   id: string;
   name: string;
   tagline: string;
+  /** Parent company shown in the store header. */
+  owner: string;
   theme: {
     bg: string;
     fg: string;
@@ -155,6 +157,9 @@ export type RunState = {
   nextReleaseAt: number;
   /** Set when status leaves 'playing'. */
   endedAt: number | null;
+  /** False until the player dismisses the opening screen. Persisted so it
+   *  does not reappear on reload, and reset by RESTART. */
+  welcomeSeen: boolean;
   /**
    * UI-only convenience fields. Announcements are NOT persisted — storage
    * strips them on save/load; defined here only for the in-memory shape.
@@ -175,4 +180,5 @@ export type GameAction =
   | { type: 'TICK'; now: number; dt: number; rand: () => number }
   | { type: 'DISMISS_ANNOUNCEMENT'; id: string }
   | { type: 'SET_STOREFRONT'; storefrontId: string }
+  | { type: 'DISMISS_WELCOME' }
   | { type: 'RESTART'; now: number };

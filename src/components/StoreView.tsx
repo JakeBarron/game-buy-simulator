@@ -85,6 +85,7 @@ export function StoreView(props: {
             {activeStorefront.name}
           </h2>
           <p className="text-sm opacity-75">{activeStorefront.tagline}</p>
+          <p className="text-xs opacity-50 mt-0.5">{activeStorefront.owner}</p>
         </div>
       )}
 
