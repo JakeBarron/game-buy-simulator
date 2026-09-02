@@ -33,12 +33,12 @@ Single static SPA at the repository root: `src/`, `index.html`, `package.json`. 
 
 **Purpose**: Repository, scaffold, and a verified deployment path before any game logic exists
 
-- [ ] T001 Create the GitHub repository with `gh repo create JakeBarron/game-buy-simulator --public --description "A browser game about spending your remaining hours on games you will never play"` (run from `/Users/jake/dev/game-buy-simulator`; `gh` is already authenticated as JakeBarron)
-- [ ] T002 Initialize git in `/Users/jake/dev/game-buy-simulator`, add `.gitignore` (node_modules, dist, .vercel, .DS_Store), commit the existing `.specify/` and `specs/` design documents, and push to `origin main`
-- [ ] T003 Scaffold the app at the repository root with `npm create vite@latest . -- --template react-ts`, keeping the existing `.specify/`, `.claude/`, and `specs/` directories intact
-- [ ] T004 Add Tailwind CSS 4 via `@tailwindcss/vite` in `vite.config.ts` and `@import "tailwindcss"` in `src/index.css`
-- [ ] T005 [P] Create `README.md` with a one-paragraph description, run/build/deploy commands, and an empty `## Known Gaps` section (required by constitution Principle III)
-- [ ] T006 Deploy the untouched scaffold with `vercel deploy` to confirm static hosting works end to end before any game code exists, and record the URL in `README.md`
+- [X] T001 Create the GitHub repository with `gh repo create JakeBarron/game-buy-simulator --public --description "A browser game about spending your remaining hours on games you will never play"` (run from `/Users/jake/dev/game-buy-simulator`; `gh` is already authenticated as JakeBarron)
+- [X] T002 Initialize git in `/Users/jake/dev/game-buy-simulator`, add `.gitignore` (node_modules, dist, .vercel, .DS_Store), commit the existing `.specify/` and `specs/` design documents, and push to `origin main`
+- [X] T003 Scaffold the app at the repository root with `npm create vite@latest . -- --template react-ts`, keeping the existing `.specify/`, `.claude/`, and `specs/` directories intact
+- [X] T004 Add Tailwind CSS 4 via `@tailwindcss/vite` in `vite.config.ts` and `@import "tailwindcss"` in `src/index.css`
+- [X] T005 [P] Create `README.md` with a one-paragraph description, run/build/deploy commands, and an empty `## Known Gaps` section (required by constitution Principle III)
+- [ ] T006 ⛔ BLOCKED (Vercel CLI not installed; needs `npm i -g vercel` + interactive `vercel login`) Deploy the untouched scaffold with `vercel deploy` to confirm static hosting works end to end before any game code exists, and record the URL in `README.md`
 
 **Checkpoint**: A blank React app is on GitHub and live on Vercel.
 
@@ -50,14 +50,14 @@ Single static SPA at the repository root: `src/`, `index.html`, `package.json`. 
 
 **⚠️ CRITICAL**: No user story work can begin until this phase is complete
 
-- [ ] T007 Define all shared types in `src/lib/types.ts` per `data-model.md`: `Game`, `Storefront`, `Listing`, `RunState`, `Shift`, `Puzzle`, `Sale`, `PurchaseRecord`, `Announcement`
-- [ ] T008 [P] Create `src/lib/config.ts` with the tuning constants from `data-model.md`: `STARTING_HOURS` 1500, `WORK_REQUIRED_MS` 45000, `DRAIN_PER_WORK_MS` 0.006, `SPACE_TIME_MULT` 3, `SPACE_DRAIN_MULT` 1.5, `WAGE` 600, `MIN_PRICE`, sale and release interval ranges, and a `?fast` dev override that compresses sale/release intervals only (never shift length)
-- [ ] T009 [P] Implement deterministic procedural art in `src/lib/thumbnail.ts`: hash a game id into a gradient pair, geometric motif, and glyph, returned as inline SVG props (research D4)
-- [ ] T010 Author `src/data/catalogue.ts`: 3 storefronts with distinct names/taglines/theme colors, ~24 starting games plus ~10 `releasePool` games with invented titles and blurbs, listings spreading games across 1–3 storefronts at differing prices, and a pool of ~15 sale names mixing plausible and absurd reasons
+- [X] T007 Define all shared types in `src/lib/types.ts` per `data-model.md`: `Game`, `Storefront`, `Listing`, `RunState`, `Shift`, `Puzzle`, `Sale`, `PurchaseRecord`, `Announcement`
+- [X] T008 [P] Create `src/lib/config.ts` with the tuning constants from `data-model.md`: `STARTING_HOURS` 1500, `WORK_REQUIRED_MS` 45000, `DRAIN_PER_WORK_MS` 0.006, `SPACE_TIME_MULT` 3, `SPACE_DRAIN_MULT` 1.5, `WAGE` 600, `MIN_PRICE`, sale and release interval ranges, and a `?fast` dev override that compresses sale/release intervals only (never shift length)
+- [X] T009 [P] Implement deterministic procedural art in `src/lib/thumbnail.ts`: hash a game id into a gradient pair, geometric motif, and glyph, returned as inline SVG props (research D4)
+- [X] T010 Author `src/data/catalogue.ts`: 3 storefronts with distinct names/taglines/theme colors, ~24 starting games plus ~10 `releasePool` games with invented titles and blurbs, listings spreading games across 1–3 storefronts at differing prices, and a pool of ~15 sale names mixing plausible and absurd reasons
 - [ ] T011 Implement pure selectors in `src/lib/economy.ts`: `currentPrice`, `canAfford`, `isOwned`, `availableGameIds`, `collectionProgress`, `restingShiftCost`, `spacedShiftCost`, `currentDrainRate`, `runStats` (no React, no `Date.now()`, no randomness)
 - [ ] T012 Implement pure time resolution in `src/lib/timeEngine.ts`: compute `wallMs`, `bonusMs`, `workMs`, `remaining`, and the split drain `DRAIN × wallMs + SPACE_DRAIN_MULT × DRAIN × bonusMs` per research D6b
 - [ ] T013 Implement `src/lib/gameReducer.ts` with the action surface from `contracts/ui-contract.md` (`BUY`, `START_SHIFT`, `SOLVE_PUZZLE`, `SET_SPACING_OUT`, `TICK`, `DISMISS_ANNOUNCEMENT`, `SET_STOREFRONT`, `RESTART`), keeping it pure with `now`/`dt`/randomness injected, and implementing the normative `TICK` resolution order (bonus accrual → drain/death → completion → sale expiry → sale roll → release roll → victory check)
-- [ ] T014 Implement `src/lib/storage.ts`: load/save the whole `RunState` to `localStorage["gbs.run.v1"]`, discarding the save on missing, malformed, or version-mismatched data, and always restoring `spacingOut` as `false`
+- [X] T014 Implement `src/lib/storage.ts`: load/save the whole `RunState` to `localStorage["gbs.run.v1"]`, discarding the save on missing, malformed, or version-mismatched data, and always restoring `spacingOut` as `false`
 - [ ] T015 Build the app shell in `src/App.tsx`: reducer + context provider, a ~100ms `TICK` interval, view switching state, and a load path that replays elapsed time through `TICK` **before first render**
 - [ ] T016 [P] Create `src/components/HoursHeader.tsx` showing `hoursRemaining` to one decimal, active-shift remaining time, collection progress, and the current drain rate
 - [ ] T017 [P] Create `src/components/NavBar.tsx` switching between store / work / library / history in a single action (SC-007)
@@ -88,7 +88,7 @@ Single static SPA at the repository root: `src/`, `index.html`, `package.json`. 
 
 **Independent Test**: Solve the puzzle instantly and confirm the shift still takes its full time; then hold the spacing-out control and confirm it finishes ~3x faster while costing more hours
 
-- [ ] T023 [P] [US2] Implement `src/lib/puzzles.ts` generating the three trivial puzzle kinds (`arithmetic`, `match-shape`, `type-word`) with trimmed case-insensitive answer checking (FR-015, SC-004)
+- [X] T023 [P] [US2] Implement `src/lib/puzzles.ts` generating the three trivial puzzle kinds (`arithmetic`, `match-shape`, `type-word`) with trimmed case-insensitive answer checking (FR-015, SC-004)
 - [ ] T024 [US2] Create `src/components/Puzzle.tsx` presenting a puzzle, rejecting wrong answers with feedback and no penalty, and allowing unlimited retries (FR-016)
 - [ ] T025 [US2] Wire `START_SHIFT` and `SOLVE_PUZZLE` in `src/lib/gameReducer.ts`, recording `puzzleSolvedAt` with **no effect** on `workRequiredMs`, and enforcing one shift at a time (FR-017, FR-019)
 - [ ] T026 [US2] Implement shift drain, completion, and wage payment in the `TICK` handler of `src/lib/gameReducer.ts`, paying the wage only on completion and never partially (FR-018, FR-036, FR-037)
