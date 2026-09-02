@@ -463,10 +463,10 @@ buy out the catalogue and confirm the victory screen appears.
 - **Content is satirical**: The "hours-till-death" framing is dark comedy about spending life on a
   backlog, not a wellness or health feature, and no real-world health claims or data are involved.
 - **Shift economy**: A shift drains hours continuously and pays a larger fixed wage on completion,
-  netting positive. Starting values for tuning: 1,500 starting hours; a 45-second resting shift
-  draining ~270 hours and paying ~600 (net +330). Spacing out advances work-time 3x and drains
-  ~1.5x per unit of work, so a fully spaced-out shift finishes in ~15 seconds, costs ~360 hours, and
-  nets ~+240. These are design targets, not requirements, and will be tuned by play.
+  netting positive. Values tuned by play: 600 starting hours; a 45-second resting shift draining 45
+  hours (1 h/sec) and paying 150 (net +105). Spacing out advances work-time 3x and drains ~1.5x per
+  unit of work, so a fully spaced-out shift finishes in ~15 seconds at 4 h/sec, costs 60 hours, and
+  nets +90. These are design targets, not requirements, and will be tuned by play.
 - **Shift length is game-time, not a real-world bit**: The original conceit was a literal 5-minute
   wait. That was shortened because the joke lives in the puzzle being irrelevant and in zoning out
   being the only thing that helps — neither of which needs five real minutes to land.

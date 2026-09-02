@@ -2,15 +2,19 @@
 // See specs/001-game-buy-simulator/data-model.md for the reference values.
 
 export const SCHEMA_VERSION = 2;
-export const STARTING_HOURS = 1500;
+// Tuned by play (T051). The starting catalogue costs 1253 hours at cheapest
+// prices, so the original 1500-hour start let the player buy everything before
+// ever working - the loop never engaged. 600 forces work early while leaving
+// room to misjudge a shift.
+export const STARTING_HOURS = 600;
 export const WORK_REQUIRED_MS = 45_000;
 /** Hours per ms of work-time at rest -> 270 hours per resting shift. */
-export const DRAIN_PER_WORK_MS = 0.006;
+export const DRAIN_PER_WORK_MS = 0.001;
 /** Work-time advances 3x while spacing out. */
 export const SPACE_TIME_MULT = 3;
 /** Drain per unit of work-time is 1.5x while spacing out. */
 export const SPACE_DRAIN_MULT = 1.5;
-export const WAGE = 600;
+export const WAGE = 150;
 export const MIN_PRICE = 1;
 export const TICK_MS = 100;
 export const ANNOUNCEMENT_MS = 6000;
@@ -105,14 +109,16 @@ export function restingShiftDrain(c: Config): number {
  *   drain = DRAIN_PER_WORK_MS * (WORK_REQUIRED_MS / 3)
  *         + SPACE_DRAIN_MULT * DRAIN_PER_WORK_MS * (WORK_REQUIRED_MS * 2 / 3)
  *
- * With the default numbers (DRAIN_PER_WORK_MS = 0.006, WORK_REQUIRED_MS =
+ * With the tuned numbers (DRAIN_PER_WORK_MS = 0.001, WORK_REQUIRED_MS =
  * 45_000, SPACE_DRAIN_MULT = 1.5):
  *
- *   baseline = 0.006 * 15_000 = 90
- *   bonus    = 1.5 * 0.006 * 30_000 = 270
- *   total    = 90 + 270 = 360
+ *   baseline = 0.001 * 15_000 = 15
+ *   bonus    = 1.5 * 0.001 * 30_000 = 45
+ *   total    = 15 + 45 = 60
  *
- * ...matching the ~360 reference value in data-model.md.
+ * ...against 45 for a resting shift, so zoning out costs a third more for the
+ * same 150 wage. (The 270/360 figures in data-model.md were the pre-tuning
+ * reference values, kept there as design targets.)
  */
 export function spacedShiftDrain(c: Config): number {
   const baselineWorkMs = c.WORK_REQUIRED_MS / 3;
