@@ -1,6 +1,7 @@
 import type { Puzzle } from '../lib/types';
 import { PuzzleGate } from './Puzzle';
 import { SpaceOutButton } from './SpaceOutButton';
+import { hours, hoursPerSecond } from '../lib/format';
 
 export function WorkView(props: {
   puzzle: Puzzle | null;
@@ -47,7 +48,7 @@ export function WorkView(props: {
             <div className="flex items-center justify-between">
               <span className="text-slate-400 text-sm">Full shift, resting</span>
               <span className="font-mono text-slate-100">
-                -{restingCost.toFixed(1)}h
+                −{hours(restingCost)}
               </span>
             </div>
             <div className="flex items-center justify-between">
@@ -55,7 +56,7 @@ export function WorkView(props: {
                 Full shift, spaced out the whole way
               </span>
               <span className="font-mono text-fuchsia-400">
-                -{spacedCost.toFixed(1)}h
+                −{hours(spacedCost)}
               </span>
             </div>
             <div className="h-px bg-slate-700" />
@@ -67,8 +68,8 @@ export function WorkView(props: {
 
           {lethal && (
             <div className="mb-6 border border-red-500 bg-red-950/60 text-red-300 text-sm p-4">
-              You have {hoursRemaining.toFixed(1)}h left. A full resting shift
-              costs {restingCost.toFixed(1)}h. This shift will kill you.
+              You have {hours(hoursRemaining)} left. A full resting shift
+              costs {hours(restingCost)}. This shift will kill you.
             </div>
           )}
 
@@ -162,7 +163,7 @@ export function WorkView(props: {
               spacingOut ? 'text-fuchsia-200' : 'text-slate-200',
             ].join(' ')}
           >
-            -{drainPerSecond.toFixed(2)}h/s
+            −{hoursPerSecond(drainPerSecond, 2)}
           </span>
         </div>
 

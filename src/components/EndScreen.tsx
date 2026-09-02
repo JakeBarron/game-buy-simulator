@@ -1,3 +1,4 @@
+import { hoursWhole } from '../lib/format';
 export function EndScreen(props: {
   status: 'dead' | 'won';
   gamesOwned: number;
@@ -47,7 +48,7 @@ export function EndScreen(props: {
 
           <div className="bg-slate-900/50 rounded-lg px-6 py-8 border border-slate-800">
             <div className="text-4xl font-bold text-slate-100 mb-2">
-              {Math.floor(props.hoursSpent)}h
+              {hoursWhole(props.hoursSpent)}
             </div>
             <div className="text-sm text-slate-500 uppercase tracking-wide">
               Hours Spent
@@ -65,7 +66,7 @@ export function EndScreen(props: {
 
           <div className="bg-slate-900/50 rounded-lg px-6 py-8 border border-slate-800">
             <div className="text-4xl font-bold text-slate-100 mb-2">
-              {Math.floor(props.hoursDrained)}h
+              {hoursWhole(props.hoursDrained)}
             </div>
             <div className="text-sm text-slate-500 uppercase tracking-wide">
               Hours Drained

@@ -1,4 +1,5 @@
 import type { PurchaseRecord } from '../lib/types';
+import { hours } from '../lib/format';
 
 export function HistoryView(props: {
   records: { record: PurchaseRecord; gameTitle: string; storefrontName: string }[];
@@ -20,7 +21,7 @@ export function HistoryView(props: {
             Total Hours Spent
           </p>
           <p className="mt-2 text-4xl font-bold text-white">
-            {totalHoursSpent.toFixed(1)}
+            {hours(totalHoursSpent)}
           </p>
         </div>
       </div>
@@ -53,7 +54,7 @@ export function HistoryView(props: {
                             {record.discountPercent}% OFF
                           </span>
                           <span className="text-xs text-green-200 line-through">
-                            {record.listPrice.toFixed(1)}h
+                            {hours(record.listPrice)}
                           </span>
                         </div>
                       )}
@@ -63,7 +64,7 @@ export function HistoryView(props: {
                     </div>
                     <div className="text-right">
                       <p className="font-semibold text-white">
-                        {record.pricePaid.toFixed(1)}h
+                        {hours(record.pricePaid)}
                       </p>
                     </div>
                   </div>

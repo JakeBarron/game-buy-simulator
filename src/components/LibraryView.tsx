@@ -1,5 +1,6 @@
 import type { Game } from '../lib/types';
 import { Thumbnail } from './Thumbnail';
+import { hours } from '../lib/format';
 
 export function LibraryView(props: {
   games: Game[];
@@ -23,7 +24,7 @@ export function LibraryView(props: {
         <p className="mt-3 text-gray-300">
           Time invested:{' '}
           <span className="font-semibold text-white">
-            {totalHoursSpent.toFixed(1)} hours
+            {hours(totalHoursSpent)}
           </span>
         </p>
       </div>

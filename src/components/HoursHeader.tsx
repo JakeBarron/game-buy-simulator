@@ -1,3 +1,4 @@
+import { hours, hoursPerSecond } from '../lib/format';
 export function HoursHeader(props: {
   hoursRemaining: number;
   shiftRemainingMs: number | null;
@@ -7,7 +8,7 @@ export function HoursHeader(props: {
   available: number;
   cannotAffordShift: boolean;
 }) {
-  const formatHours = (h: number) => h.toFixed(1);
+  const formatHours = (h: number) => hours(h);
   const formatSeconds = (ms: number) => (ms / 1000).toFixed(1);
   const progressPercent = props.available > 0 ? (props.owned / props.available) * 100 : 0;
 
@@ -18,9 +19,8 @@ export function HoursHeader(props: {
         <div className="flex items-baseline gap-3">
           <div className="text-5xl font-bold font-mono tracking-tight">
             <span className="text-slate-100">{formatHours(props.hoursRemaining)}</span>
-            <span className="text-xl text-slate-500 font-normal ml-2">hours</span>
           </div>
-          <span className="text-slate-400 text-sm">till death</span>
+          <span className="text-slate-400 text-sm">remaining</span>
         </div>
 
         {/* Shift Status & Collection Progress */}
@@ -39,7 +39,7 @@ export function HoursHeader(props: {
                   {props.spacingOut ? '⚡ spacing out' : 'at work'}
                 </div>
                 <div className="text-xs text-slate-300 mt-1">
-                  {formatSeconds(props.shiftRemainingMs)}s left • {props.drainPerSecond.toFixed(1)}/s
+                  {formatSeconds(props.shiftRemainingMs)}s left • {hoursPerSecond(props.drainPerSecond)}
                 </div>
               </div>
             ) : (

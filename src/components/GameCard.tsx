@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Game, Listing } from '../lib/types';
 import { Thumbnail } from './Thumbnail';
+import { hours } from '../lib/format';
 
 export function GameCard(props: {
   game: Game;
@@ -50,11 +51,11 @@ export function GameCard(props: {
           <div className="flex flex-col leading-tight">
             {onSale ? (
               <>
-                <span className="text-xs text-neutral-500 line-through">{listPrice} h</span>
-                <span className="text-base font-bold text-rose-400">{price} h</span>
+                <span className="text-xs text-neutral-500 line-through">{hours(listPrice, 0)}</span>
+                <span className="text-base font-bold text-rose-400">{hours(price, 0)}</span>
               </>
             ) : (
-              <span className="text-base font-bold text-neutral-100">{price} h</span>
+              <span className="text-base font-bold text-neutral-100">{hours(price, 0)}</span>
             )}
           </div>
 
