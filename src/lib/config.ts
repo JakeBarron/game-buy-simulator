@@ -48,12 +48,10 @@ export const REAPPRAISAL_INTERVAL_MS: Range = { min: 45_000, max: 90_000 };
 export const EARLY_ADOPTER_MULTIPLIER = 2;
 /**
  * Franchise-bonus coefficient (Task 6, valuation.franchiseBonus): a fully-owned series of
- * `size` games pays `FRANCHISE_BONUS_COEFFICIENT * size * (size + 1) / 2` — triangular growth,
- * not flat-linear, so a four-game set (10x coefficient) is worth meaningfully more than double a
- * pair (3x coefficient), not just double. Several catalogue titles are the only released entry
- * in their in-fiction franchise (size 1, paying 1x coefficient) — that still pays something, on
- * purpose; the joke is that "completing" some franchises only ever required the one game. Task
- * 7's to tune.
+ * `size` games (size >= 2 — a size-of-one "series" pays nothing, see franchiseBonusForSize)
+ * pays `FRANCHISE_BONUS_COEFFICIENT * size * (size + 1) / 2` — triangular growth, not
+ * flat-linear, so a four-game set (10x coefficient) is worth meaningfully more than double a
+ * pair (3x coefficient), not just double. Task 7's to tune.
  */
 export const FRANCHISE_BONUS_COEFFICIENT = 10;
 

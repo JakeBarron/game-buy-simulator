@@ -398,22 +398,30 @@ export type FranchiseBonusEntry = { series: string; size: number; bonus: number 
 
 /**
  * Bonus for a fully-owned series of `size` games. Triangular growth
- * (`coefficient * size * (size + 1) / 2`: 1, 3, 6, 10, 15 x coefficient for sizes 1-5) rather
- * than flat-linear, so a larger set pays meaningfully more than proportionally more — a
- * four-game set is worth 10x coefficient, not just 4x, more than double a pair's 3x. A
- * single-game "series" (several catalogue titles are the only released entry in their
- * in-fiction franchise) still pays 1x coefficient — completing it only ever required the one
- * purchase, and that's the joke, not a bug.
+ * (`coefficient * size * (size + 1) / 2`: 3, 6, 10, 15 x coefficient for sizes 2-5) rather than
+ * flat-linear, so a larger set pays meaningfully more than proportionally more — a four-game set
+ * is worth 10x coefficient, not just 4x, more than double a pair's 3x.
+ *
+ * A size-of-one "series" pays NOTHING (0 below size 2), on purpose: a handful of catalogue
+ * titles carry a `series` tag but no sibling ever shipped, so "owning it" was never a
+ * completion, just a purchase — the same hollowness the partial-set rule already guards
+ * against, just at size 1. (An earlier version of this function paid a smaller bonus at size 1,
+ * back when every catalogue series happened to have exactly one member; now that real
+ * multi-game series exist — see `destiny-witness`, `meditation`, `pro-baseball` in
+ * catalogue.ts — that would have been indistinguishable from paying a bonus for buying any old
+ * game, so it's gone.)
  */
 export function franchiseBonusForSize(size: number): number {
+  if (size < 2) return 0;
   return FRANCHISE_BONUS_COEFFICIENT * ((size * (size + 1)) / 2);
 }
 
 /**
- * Every fully-owned series among `games`, with its size and bonus. A series missing even one
- * member pays nothing — partial completion earns nothing extra, only each owned member's own
- * curve value. A game with no `series` never contributes. Order follows first appearance of
- * each series in `games`.
+ * Every fully-owned series among `games` that pays a nonzero bonus (size >= 2 — see
+ * `franchiseBonusForSize`), with its size and bonus. A series missing even one member pays
+ * nothing — partial completion earns nothing extra, only each owned member's own curve value. A
+ * game with no `series` never contributes. Order follows first appearance of each series in
+ * `games`.
  */
 export function franchiseBonus(ownedGameIds: string[], games: Game[]): FranchiseBonusEntry[] {
   const owned = new Set(ownedGameIds);
@@ -428,7 +436,9 @@ export function franchiseBonus(ownedGameIds: string[], games: Game[]): Franchise
   const result: FranchiseBonusEntry[] = [];
   for (const [series, members] of membersBySeries) {
     if (!members.every((g) => owned.has(g.id))) continue;
-    result.push({ series, size: members.length, bonus: franchiseBonusForSize(members.length) });
+    const bonus = franchiseBonusForSize(members.length);
+    if (bonus <= 0) continue;
+    result.push({ series, size: members.length, bonus });
   }
   return result;
 }

@@ -5,7 +5,7 @@ import {
   franchiseBonus, franchiseBonusForSize, totalEarlyAdopterBonus,
   scoreBreakdown, regretList, worstHold,
 } from './valuation'
-import { EARLY_ADOPTER_MULTIPLIER, FRANCHISE_BONUS_COEFFICIENT } from './config'
+import { EARLY_ADOPTER_MULTIPLIER } from './config'
 import type { Game, ReappraisalHistoryEntry, Review } from './types'
 
 // Tiny deterministic PRNG (mulberry32) so statistical tests are reproducible and don't rely on
@@ -369,10 +369,10 @@ describe('franchiseBonus', () => {
     expect(franchiseBonus(['solo'], [untagged])).toEqual([])
   })
 
-  it('still pays a (smaller) bonus for a single-game series, since owning it does complete that series', () => {
+  it('pays nothing for a size-of-one series — a "set" of one game is not a completion', () => {
     const solo = makeGame({ id: 'solo-series', series: 'solo' })
-    const result = franchiseBonus(['solo-series'], [solo])
-    expect(result).toEqual([{ series: 'solo', size: 1, bonus: FRANCHISE_BONUS_COEFFICIENT }])
+    expect(franchiseBonusForSize(1)).toBe(0)
+    expect(franchiseBonus(['solo-series'], [solo])).toEqual([])
   })
 })
 
