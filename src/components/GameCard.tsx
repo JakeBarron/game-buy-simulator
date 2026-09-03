@@ -83,10 +83,11 @@ export function GameCard(props: {
           type="button"
           aria-expanded={reviewsOpen}
           aria-controls={reviewsPanelId}
+          aria-label={`${reviewsOpen ? 'Hide' : 'Show'} reviews for ${game.title}`}
           onClick={() => setReviewsOpen((open) => !open)}
-          className="-mt-1 self-start text-xs font-medium text-neutral-400 underline-offset-2 hover:text-neutral-200 hover:underline"
+          className="-ml-3 -mt-1 self-start rounded px-3 py-1.5 text-xs font-medium text-neutral-400 underline-offset-2 hover:text-neutral-200 hover:underline"
         >
-          {reviewsOpen ? 'Hide reviews' : `Read reviews (${shownReviews.length})`}
+          {reviewsOpen ? 'Hide reviews' : `Reviews (${shownReviews.length})`}
         </button>
 
         <ul
@@ -95,7 +96,7 @@ export function GameCard(props: {
           className="flex flex-col gap-2 rounded bg-neutral-950/60 p-2"
         >
           {shownReviews.map((review, i) => (
-            <li key={i} className="text-xs leading-snug">
+            <li key={i} className="break-words text-xs leading-snug">
               <span className="font-semibold text-neutral-300">
                 {SENTIMENT_LABEL[review.sentiment]}
               </span>

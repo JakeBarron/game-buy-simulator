@@ -594,7 +594,7 @@ export const GAMES: Game[] = [
     blurb: 'Broken physics IS the gameplay. Bugs are features. Pray it works.',
     basePrice: 20,
     releasePool: true,
-    traits: ['asset-flip'],
+    traits: ['hype'],
     marketRating: 1,
     reviewCount: 150,
     reviews: [
