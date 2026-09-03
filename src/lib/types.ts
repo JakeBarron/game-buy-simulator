@@ -5,6 +5,25 @@
 // Static catalogue data (src/data/catalogue.ts, never mutated)
 // ---------------------------------------------------------------------------
 
+/** Blurb archetype tags. The tell a player reads alongside rating/review count. */
+export type GameTrait =
+  | 'contemplative'
+  | 'asset-flip'
+  | 'annual-sequel'
+  | 'early-access'
+  | 'cult'
+  | 'hype'
+  | 'grind'
+  | 'prestige';
+
+export type ReviewSentiment = 'glowing' | 'positive' | 'mixed' | 'negative' | 'damning';
+
+export type Review = {
+  sentiment: ReviewSentiment;
+  text: string;
+  author: string;
+};
+
 export type Game = {
   id: string;
   title: string;
@@ -13,6 +32,19 @@ export type Game = {
   basePrice: number;
   /** true = held back for mid-run release (FR-045), absent from the starting catalogue. */
   releasePool?: boolean;
+  /** 1-3 blurb archetype tags; must match what the blurb implies. */
+  traits: GameTrait[];
+  /** Crowd's average opinion, 1-5, integer. Visible; drives sale frequency later. */
+  marketRating: number;
+  /** How much to trust marketRating — a rating with few reviews is noise. */
+  reviewCount: number;
+  /**
+   * POOL of 5-8 authored reviews spanning sentiments, not the reviews shown.
+   * A run selects a stable slice for display (Task 3+ selects per-run).
+   */
+  reviews: Review[];
+  /** Franchise id, only for games that belong to one implied sequel/series. */
+  series?: string;
 };
 
 export type Storefront = {

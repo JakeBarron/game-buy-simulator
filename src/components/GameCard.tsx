@@ -1,7 +1,28 @@
 import { useEffect, useState } from 'react';
-import type { Game, Listing } from '../lib/types';
+import type { Game, Listing, ReviewSentiment } from '../lib/types';
 import { Thumbnail } from './Thumbnail';
 import { hours } from '../lib/format';
+
+/** Stable slice of the review pool shown on the card. Per-run selection arrives later. */
+const REVIEWS_SHOWN = 3;
+
+const SENTIMENT_LABEL: Record<ReviewSentiment, string> = {
+  glowing: 'Glowing',
+  positive: 'Positive',
+  mixed: 'Mixed',
+  negative: 'Negative',
+  damning: 'Damning',
+};
+
+function Stars(props: { rating: number }) {
+  const { rating } = props;
+  return (
+    <span aria-hidden="true" className="tracking-tight text-amber-400">
+      {'★'.repeat(rating)}
+      <span className="text-neutral-700">{'★'.repeat(5 - rating)}</span>
+    </span>
+  );
+}
 
 export function GameCard(props: {
   game: Game;
@@ -16,6 +37,7 @@ export function GameCard(props: {
   const { game, price, listPrice, discountPercent, owned, affordable, onBuy } = props;
 
   const [justBought, setJustBought] = useState(false);
+  const [reviewsOpen, setReviewsOpen] = useState(false);
 
   useEffect(() => {
     if (!justBought) return;
@@ -24,6 +46,8 @@ export function GameCard(props: {
   }, [justBought]);
 
   const onSale = discountPercent > 0;
+  const reviewsPanelId = `${game.id}-reviews`;
+  const shownReviews = game.reviews.slice(0, REVIEWS_SHOWN);
 
   function handleBuy() {
     onBuy();
@@ -46,6 +70,40 @@ export function GameCard(props: {
         <h3 className="truncate text-sm font-semibold text-neutral-100">{game.title}</h3>
 
         <p className="line-clamp-2 text-xs text-neutral-400">{game.blurb}</p>
+
+        <div
+          className="flex items-center gap-1.5 text-xs"
+          aria-label={`Rated ${game.marketRating} out of 5 stars, ${game.reviewCount.toLocaleString()} reviews`}
+        >
+          <Stars rating={game.marketRating} />
+          <span className="text-neutral-500">({game.reviewCount.toLocaleString()})</span>
+        </div>
+
+        <button
+          type="button"
+          aria-expanded={reviewsOpen}
+          aria-controls={reviewsPanelId}
+          onClick={() => setReviewsOpen((open) => !open)}
+          className="-mt-1 self-start text-xs font-medium text-neutral-400 underline-offset-2 hover:text-neutral-200 hover:underline"
+        >
+          {reviewsOpen ? 'Hide reviews' : `Read reviews (${shownReviews.length})`}
+        </button>
+
+        <ul
+          id={reviewsPanelId}
+          hidden={!reviewsOpen}
+          className="flex flex-col gap-2 rounded bg-neutral-950/60 p-2"
+        >
+          {shownReviews.map((review, i) => (
+            <li key={i} className="text-xs leading-snug">
+              <span className="font-semibold text-neutral-300">
+                {SENTIMENT_LABEL[review.sentiment]}
+              </span>
+              <span className="text-neutral-500"> — {review.author}</span>
+              <p className="text-neutral-400">{review.text}</p>
+            </li>
+          ))}
+        </ul>
 
         <div className="mt-auto flex items-center justify-between gap-2 pt-1">
           <div className="flex flex-col leading-tight">
