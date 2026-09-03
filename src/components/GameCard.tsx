@@ -1,10 +1,8 @@
 import { useEffect, useState } from 'react';
-import type { Game, Listing, ReviewSentiment } from '../lib/types';
+import type { Game, Listing, Review, ReviewSentiment } from '../lib/types';
 import { Thumbnail } from './Thumbnail';
+import { Stars } from './Stars';
 import { hours } from '../lib/format';
-
-/** Stable slice of the review pool shown on the card. Per-run selection arrives later. */
-const REVIEWS_SHOWN = 3;
 
 const SENTIMENT_LABEL: Record<ReviewSentiment, string> = {
   glowing: 'Glowing',
@@ -14,16 +12,6 @@ const SENTIMENT_LABEL: Record<ReviewSentiment, string> = {
   damning: 'Damning',
 };
 
-function Stars(props: { rating: number }) {
-  const { rating } = props;
-  return (
-    <span aria-hidden="true" className="tracking-tight text-amber-400">
-      {'★'.repeat(rating)}
-      <span className="text-neutral-700">{'★'.repeat(5 - rating)}</span>
-    </span>
-  );
-}
-
 export function GameCard(props: {
   game: Game;
   listing: Listing;
@@ -32,9 +20,12 @@ export function GameCard(props: {
   discountPercent: number;
   owned: boolean;
   affordable: boolean;
+  /** This run's per-run review selection (valuation.selectReviews) — NOT the raw pool, and
+   *  NOT a hint at the hidden true value; true value itself is never shown here. */
+  displayedReviews: Review[];
   onBuy: () => void;
 }) {
-  const { game, price, listPrice, discountPercent, owned, affordable, onBuy } = props;
+  const { game, price, listPrice, discountPercent, owned, affordable, displayedReviews, onBuy } = props;
 
   const [justBought, setJustBought] = useState(false);
   const [reviewsOpen, setReviewsOpen] = useState(false);
@@ -47,7 +38,6 @@ export function GameCard(props: {
 
   const onSale = discountPercent > 0;
   const reviewsPanelId = `${game.id}-reviews`;
-  const shownReviews = game.reviews.slice(0, REVIEWS_SHOWN);
 
   function handleBuy() {
     onBuy();
@@ -87,7 +77,7 @@ export function GameCard(props: {
           onClick={() => setReviewsOpen((open) => !open)}
           className="-ml-3 -mt-1 self-start rounded px-3 py-1.5 text-xs font-medium text-neutral-400 underline-offset-2 hover:text-neutral-200 hover:underline"
         >
-          {reviewsOpen ? 'Hide reviews' : `Reviews (${shownReviews.length})`}
+          {reviewsOpen ? 'Hide reviews' : `Reviews (${displayedReviews.length})`}
         </button>
 
         <ul
@@ -95,7 +85,7 @@ export function GameCard(props: {
           hidden={!reviewsOpen}
           className="flex flex-col gap-2 rounded bg-neutral-950/60 p-2"
         >
-          {shownReviews.map((review, i) => (
+          {displayedReviews.map((review, i) => (
             <li key={i} className="break-words text-xs leading-snug">
               <span className="font-semibold text-neutral-300">
                 {SENTIMENT_LABEL[review.sentiment]}

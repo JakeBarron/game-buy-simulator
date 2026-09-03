@@ -169,6 +169,17 @@ export type RunState = {
   /** Epoch ms. Used for run-length stats. */
   startedAt: number;
   ownedGameIds: string[];
+  /**
+   * Every game's hidden true value (1-5), rolled once at run start and never rerolled. Never
+   * shown for an unowned game — see valuation.ts.
+   */
+  trueValues: Record<string, number>;
+  /**
+   * Per-run selection of which reviews from each game's authored pool are on display, rolled
+   * once at run start alongside `trueValues` so both stay stable across re-renders and reloads
+   * — rerolling either would silently invalidate every bet the player has made.
+   */
+  displayedReviews: Record<string, Review[]>;
   /** Chronological, append-only. */
   history: PurchaseRecord[];
   /** Completed shifts only. */
@@ -213,4 +224,4 @@ export type GameAction =
   | { type: 'DISMISS_ANNOUNCEMENT'; id: string }
   | { type: 'SET_STOREFRONT'; storefrontId: string }
   | { type: 'DISMISS_WELCOME' }
-  | { type: 'RESTART'; now: number };
+  | { type: 'RESTART'; now: number; rand: () => number };

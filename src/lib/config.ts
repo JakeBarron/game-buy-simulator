@@ -1,7 +1,9 @@
 // Tuning constants for Game Buy Simulator.
 // See specs/001-game-buy-simulator/data-model.md for the reference values.
 
-export const SCHEMA_VERSION = 3;
+// Bumped for Task 3: RunState gained trueValues/displayedReviews, and initialRun's signature
+// changed (rand is now required) — an old save is not shaped like a current one.
+export const SCHEMA_VERSION = 4;
 // Tuned by play (T051). The starting catalogue costs 1253 hours at cheapest
 // prices, so the original 1500-hour start let the player buy everything before
 // ever working - the loop never engaged. 600 forces work early while leaving

@@ -1,5 +1,5 @@
 import type { CSSProperties } from 'react';
-import type { Game, Listing, Storefront } from '../lib/types';
+import type { Game, Listing, Review, Storefront } from '../lib/types';
 import { GameCard } from './GameCard';
 
 export type StoreListingVM = {
@@ -10,6 +10,7 @@ export type StoreListingVM = {
   discountPercent: number;
   owned: boolean;
   affordable: boolean;
+  displayedReviews: Review[];
 };
 
 export function StoreView(props: {
@@ -115,6 +116,7 @@ export function StoreView(props: {
               discountPercent={vm.discountPercent}
               owned={vm.owned}
               affordable={vm.affordable}
+              displayedReviews={vm.displayedReviews}
               onBuy={() => onBuy(vm.listing.id)}
             />
           ))}

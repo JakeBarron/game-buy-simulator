@@ -5,16 +5,17 @@ import { loadRun, saveRun } from './lib/storage'
 import { makePuzzle } from './lib/puzzles'
 import { shiftProgress, currentDrainRatePerMs } from './lib/timeEngine'
 import {
-  availableListings, canAfford, collectionProgress, currentPrice, discountFor,
+  availableListings, canAfford, currentPrice, discountFor,
   gameById, isOwned, listingsForStorefront, restingShiftCost, spacedShiftCost,
   canSurviveRestingShift, totalHoursSpent, runStats, storefrontById,
 } from './lib/economy'
+import { collectionScore, scoreForValue } from './lib/valuation'
 import { STOREFRONTS } from './data/catalogue'
 import { HoursHeader } from './components/HoursHeader'
 import { NavBar, type View } from './components/NavBar'
 import { StoreView, type StoreListingVM } from './components/StoreView'
 import { WorkView } from './components/WorkView'
-import { LibraryView } from './components/LibraryView'
+import { LibraryView, type LibraryGameVM } from './components/LibraryView'
 import { HistoryView } from './components/HistoryView'
 import { AnnouncementStack } from './components/Announcement'
 import { EndScreen } from './components/EndScreen'
@@ -26,7 +27,7 @@ import { Welcome } from './components/Welcome'
 function bootState() {
   const now = Date.now()
   const saved = loadRun()
-  const base = saved ?? initialRun(now, CONFIG)
+  const base = saved ?? initialRun(now, CONFIG, Math.random)
   return gameReducer(base, { type: 'TICK', now, dt: 0, rand: Math.random }, CONFIG)
 }
 
@@ -58,8 +59,8 @@ export default function App() {
   const shift = state.activeShift
   const progress = shift ? shiftProgress(shift, now, CONFIG) : null
   const drainPerSecond = shift ? currentDrainRatePerMs(shift, CONFIG) * 1000 : 0
-  const progressCounts = collectionProgress(state)
   const spent = totalHoursSpent(state)
+  const score = collectionScore(state.ownedGameIds, state.trueValues)
 
   // Leaving the work view must release the hold — spacing out requires being
   // at your desk, deliberately (FR-055).
@@ -82,13 +83,19 @@ export default function App() {
           discountPercent: discountFor(listing, state.activeSale),
           owned: isOwned(state, game.id),
           affordable: canAfford(state, price),
+          displayedReviews: state.displayedReviews[game.id] ?? [],
         }]
       })
   }, [state])
 
-  const ownedGames = useMemo(
-    () => state.ownedGameIds.flatMap(id => { const g = gameById(id); return g ? [g] : [] }),
-    [state.ownedGameIds],
+  const ownedGames: LibraryGameVM[] = useMemo(
+    () => state.ownedGameIds.flatMap(id => {
+      const game = gameById(id)
+      if (!game) return []
+      const trueValue = state.trueValues[id]
+      return [{ game, trueValue, points: scoreForValue(trueValue) }]
+    }),
+    [state.ownedGameIds, state.trueValues],
   )
 
   const historyRows = useMemo(
@@ -119,14 +126,13 @@ export default function App() {
           shiftRemainingMs={progress ? progress.remainingMs : null}
           spacingOut={shift?.spacingOut ?? false}
           drainPerSecond={drainPerSecond}
-          owned={progressCounts.owned}
-          available={progressCounts.available}
+          collectionScore={score}
           cannotAffordShift={!canSurviveRestingShift(state, CONFIG)}
         />
         <NavBar
           view={view}
           onChange={setView}
-          onRestart={() => dispatch({ type: 'RESTART', now: Date.now() })}
+          onRestart={() => dispatch({ type: 'RESTART', now: Date.now(), rand: Math.random })}
           shiftActive={!!shift}
           status={state.status}
         />
@@ -188,7 +194,7 @@ export default function App() {
           hoursSpent={stats.hoursSpent}
           shiftsWorked={stats.shiftsWorked}
           hoursDrained={stats.hoursDrained}
-          onRestart={() => dispatch({ type: 'RESTART', now: Date.now() })}
+          onRestart={() => dispatch({ type: 'RESTART', now: Date.now(), rand: Math.random })}
         />
       )}
     </div>

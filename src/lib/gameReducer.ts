@@ -10,14 +10,21 @@
 // replayable (including "resolve a shift that finished while the tab was
 // closed") and testable without mocking global state.
 
-import type { RunState, GameAction, Shift, Sale, Announcement, PurchaseRecord, Listing } from './types';
+import type {
+  RunState, GameAction, Shift, Sale, Announcement, PurchaseRecord, Listing, Review,
+} from './types';
 import type { Config, Range } from './config';
 import { shiftProgress, shiftDrain, accrueBonus } from './timeEngine';
 import { currentPrice, discountFor, isOwned, hasWon, availableListings } from './economy';
+import { rollAllTrueValues, selectReviews } from './valuation';
 import { GAMES, LISTINGS, STOREFRONTS, SALE_NAMES } from '../data/catalogue';
 import { checkAnswer } from './puzzles';
 
 const LISTINGS_BY_ID = new Map<string, Listing>(LISTINGS.map((l) => [l.id, l]));
+
+/** How many of a game's authored reviews are on display for the run. Matches what the card UI
+ *  shows (GameCard) — kept here, next to the roll, rather than duplicated at the call site. */
+const DISPLAYED_REVIEWS_COUNT = 3;
 
 // ---------------------------------------------------------------------------
 // Small pure helpers
@@ -50,13 +57,31 @@ function shuffleWithRand<T>(items: T[], rand: () => number): T[] {
 // Initial state
 // ---------------------------------------------------------------------------
 
-export function initialRun(now: number, config: Config): RunState {
+export function initialRun(now: number, config: Config, rand: () => number): RunState {
+  // Rolled ONCE, here, for every game in the catalogue (including unreleased release-pool
+  // games, so they already have a stable value/review-selection the moment they land
+  // mid-run). Both persist verbatim in RunState — see storage.ts and the schema-version bump
+  // in config.ts — so a reload replays the same run rather than rerolling every bet the player
+  // has made.
+  const trueValues = rollAllTrueValues(GAMES, rand);
+  const displayedReviews: Record<string, Review[]> = {};
+  for (const game of GAMES) {
+    displayedReviews[game.id] = selectReviews(
+      game,
+      trueValues[game.id],
+      rand,
+      DISPLAYED_REVIEWS_COUNT,
+    );
+  }
+
   return {
     schemaVersion: config.SCHEMA_VERSION,
     status: 'playing',
     hoursRemaining: config.STARTING_HOURS,
     startedAt: now,
     ownedGameIds: [],
+    trueValues,
+    displayedReviews,
     history: [],
     shiftsWorked: 0,
     hoursDrained: 0,
@@ -430,8 +455,10 @@ export function gameReducer(state: RunState, action: GameAction, config: Config)
     case 'RESTART':
       // Carry welcomeSeen across a restart: the player has already read the
       // rules, and re-showing a wall of text every time they start another
-      // life would be tedious rather than atmospheric.
-      return { ...initialRun(action.now, config), welcomeSeen: state.welcomeSeen };
+      // life would be tedious rather than atmospheric. Everything else,
+      // including trueValues/displayedReviews, is rerolled fresh — a new run
+      // is a new set of bets.
+      return { ...initialRun(action.now, config, action.rand), welcomeSeen: state.welcomeSeen };
     default: {
       const exhaustive: never = action;
       return exhaustive;
