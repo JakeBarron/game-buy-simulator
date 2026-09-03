@@ -45,7 +45,9 @@ export function discountFor(listing: Listing, sale: Sale | null): number {
  * worth more later in the run in absolute terms — sales stay genuinely
  * attractive as the run goes on rather than eroding in value. Every price
  * path in the app goes through this one function; there must be no second
- * path that charges an un-inflated price.
+ * path that charges an un-inflated price. (Pass `sale: null` for the
+ * discount-free inflated price alone — cheapestUnownedPrice below does
+ * exactly that rather than duplicating the inflation lookup.)
  */
 export function currentPrice(
   listing: Listing,
@@ -54,7 +56,18 @@ export function currentPrice(
   config: Config,
 ): number {
   const storefront = storefrontById(listing.storefrontId);
-  const inflated = inflatedPrice(listing.price, elapsedMs, storefront?.inflationRate ?? 1, config);
+  if (!storefront) {
+    // Every listing's storefrontId is asserted to resolve to a real
+    // storefront (catalogue.test.ts, "keeps every listing id in sync with
+    // its storefront/game and both real"), and every Storefront now
+    // carries a required `inflationRate` — there is no legitimate way to
+    // land here. Throwing surfaces that data-integrity bug immediately
+    // instead of a silent `?? 1` fallback quietly mispricing a listing.
+    throw new Error(
+      `currentPrice: listing '${listing.id}' references unknown storefront '${listing.storefrontId}'`,
+    );
+  }
+  const inflated = inflatedPrice(listing.price, elapsedMs, storefront.inflationRate, config);
 
   const percent = discountFor(listing, sale);
   if (percent <= 0) return inflated;
@@ -115,10 +128,11 @@ export function collectionProgress(state: RunState): { owned: number; available:
 /**
  * Cheapest inflated price, at `elapsedMs`, across every currently-available
  * UNOWNED listing — the number that decides whether the player has anything
- * left they could still work toward. Ignores any active sale: sales are
- * transient and this is used to reason about prices at a FUTURE point in
- * time (see isPricedOut), where no sale can be assumed. Returns null when
- * there is no unowned listing left at all (the catalogue is exhausted).
+ * left they could still work toward. Ignores any active sale (passes
+ * `sale: null` to currentPrice): sales are transient and this is used to
+ * reason about prices at a FUTURE point in time (see isPricedOut), where no
+ * sale can be assumed. Returns null when there is no unowned listing left
+ * at all (the catalogue is exhausted).
  */
 export function cheapestUnownedPrice(
   state: RunState,
@@ -130,8 +144,7 @@ export function cheapestUnownedPrice(
 
   let min = Infinity;
   for (const listing of unowned) {
-    const storefront = storefrontById(listing.storefrontId);
-    const price = inflatedPrice(listing.price, elapsedMs, storefront?.inflationRate ?? 1, config);
+    const price = currentPrice(listing, null, elapsedMs, config);
     if (price < min) min = price;
   }
   return min;

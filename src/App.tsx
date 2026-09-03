@@ -49,6 +49,11 @@ export default function App() {
   // `now` in its own state guarantees a render, and therefore a fresh price
   // recompute, every tick regardless.
   const [now, setNow] = useState(() => Date.now())
+  // Read inside the interval closure instead of depending on state.status
+  // directly, so the interval itself never needs to be torn down and
+  // recreated on every status change.
+  const statusRef = useRef(state.status)
+  useEffect(() => { statusRef.current = state.status }, [state.status])
 
   // Single interval drives every time-based behaviour. It never accumulates
   // state itself — it just asks the pure reducer what is true now.
@@ -57,7 +62,17 @@ export default function App() {
       const n = Date.now()
       const dt = n - lastTick.current
       lastTick.current = n
-      setNow(n)
+      // Once the run has ended, freeze `now` (and therefore every derived
+      // display value keyed off it, e.g. storeListings' inflated prices)
+      // rather than letting it keep climbing behind the end screen forever
+      // — there is nothing left to display freshly, and an unbounded `now`
+      // there previously produced meaningless, ever-growing numbers (and
+      // corrupted at least one manual "how long did this take" reading
+      // during Task 4 verification, since it kept advancing well past the
+      // tick that actually flipped `status`). `dispatch` still runs even
+      // after the run ends — TICK still expires announcements in a
+      // terminal state (see gameReducer.ts) — only `now` stops.
+      if (statusRef.current === 'playing') setNow(n)
       dispatch({ type: 'TICK', now: n, dt, rand: Math.random })
     }, CONFIG.TICK_MS)
     return () => clearInterval(id)
