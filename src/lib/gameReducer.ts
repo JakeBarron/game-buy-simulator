@@ -12,13 +12,17 @@
 
 import type {
   RunState, GameAction, Shift, Sale, Announcement, PurchaseRecord, Listing, Review,
+  ReappraisalHistoryEntry,
 } from './types';
 import type { Config, Range } from './config';
 import { shiftProgress, shiftDrain, accrueBonus } from './timeEngine';
 import {
-  currentPrice, discountFor, isOwned, isPricedOut, availableListings, gameById,
+  currentPrice, discountFor, isOwned, isPricedOut, availableListings, availableGameIds, gameById,
+  effectiveMarketRating,
 } from './economy';
-import { rollAllTrueValues, selectReviews } from './valuation';
+import {
+  rollAllTrueValues, selectReviews, pickReappraisalTarget, applyReappraisal, earlyAdopterBonus,
+} from './valuation';
 import { GAMES, LISTINGS, STOREFRONTS, SALE_NAMES } from '../data/catalogue';
 import { checkAnswer } from './puzzles';
 
@@ -51,10 +55,12 @@ function pickIndex<T>(items: T[], rand: () => number): T {
  * markedly less likely to be chosen for a sale than a 1* game. Squaring the
  * (6 - rating) spread makes that skew pronounced rather than mild — a 1*
  * game is 25x as likely to be picked as a 5* game, all else equal.
+ *
+ * Uses `effectiveMarketRating`, not the raw catalogue value — a re-appraisal (Task 5) changes
+ * what the crowd currently thinks, and sale weighting must react to that.
  */
-function saleWeightFor(listing: Listing): number {
-  const rating = gameById(listing.gameId)?.marketRating ?? 3;
-  return (6 - rating) ** 2;
+function saleWeightFor(listing: Listing, state: RunState): number {
+  return (6 - effectiveMarketRating(state, listing.gameId)) ** 2;
 }
 
 /**
@@ -119,6 +125,10 @@ export function initialRun(now: number, config: Config, rand: () => number): Run
     // after this one goes through TICK's `rand`-driven scheduling.
     nextSaleAt: now + rangeMid(config.SALE_INTERVAL_MS),
     nextReleaseAt: now + rangeMid(config.RELEASE_INTERVAL_MS),
+    nextReappraisalAt: now + rangeMid(config.REAPPRAISAL_INTERVAL_MS),
+    marketRatingOverrides: {},
+    earlyAdopterBonuses: {},
+    reappraisalHistory: [],
     endedAt: null,
     welcomeSeen: false,
     activeStorefrontId: STOREFRONTS[0].id,
@@ -253,7 +263,7 @@ function startSale(state: RunState, now: number, rand: () => number, config: Con
 
   // Weighted, not uniform: highly-rated games go on sale less often (see
   // saleWeightFor).
-  const weighted = weightedShuffle(listings, saleWeightFor, rand);
+  const weighted = weightedShuffle(listings, (listing) => saleWeightFor(listing, state), rand);
   const fraction = pickInRange(rand, config.SALE_LISTING_FRACTION);
   const count = Math.min(weighted.length, Math.max(1, Math.round(weighted.length * fraction)));
   const chosen = weighted.slice(0, count);
@@ -307,6 +317,94 @@ function rollRelease(state: RunState, now: number, rand: () => number, config: C
     ...state,
     releasedGameIds: [...state.releasedGameIds, game.id],
     nextReleaseAt,
+    announcements: [...state.announcements, announcement],
+  };
+}
+
+/**
+ * Toast copy for a re-appraisal, in the project's dry deadpan voice. Reads differently along
+ * two independent axes — owned vs. unowned, up vs. down — so all four cells get their own line
+ * (Task 5, Part C) rather than one templated sentence with a swapped verb:
+ *   - owned + up: triumphant, names the bonus.
+ *   - owned + down: grim — a depreciating asset, no bonus to soften it.
+ *   - unowned + up: the one that hurts — passed on it, and it just got pricier.
+ *   - unowned + down: quietly satisfying — dodged that.
+ */
+function reappraisalText(
+  title: string,
+  direction: 'up' | 'down',
+  owned: boolean,
+  bonus: number,
+): string {
+  if (owned && direction === 'up') {
+    return `${title} just got re-rated up. You already own it. +${bonus} pts.`;
+  }
+  if (owned && direction === 'down') {
+    return `${title} just got re-rated down. You already own it.`;
+  }
+  if (!owned && direction === 'up') {
+    return `${title} just got re-rated up. You passed. It's pricier now.`;
+  }
+  return `${title} just got re-rated down. Good thing you skipped it.`;
+}
+
+function rollReappraisal(state: RunState, now: number, rand: () => number, config: Config): RunState {
+  const nextReappraisalAt = now + pickInRange(rand, config.REAPPRAISAL_INTERVAL_MS);
+
+  // Only games the player can currently see are eligible — re-appraising a game still sitting
+  // in the release pool would move numbers nobody can observe yet and could announce a title
+  // that hasn't "released" in-fiction.
+  const availableIds = new Set(availableGameIds(state));
+  const available = GAMES.filter((g) => availableIds.has(g.id));
+  const targetId = pickReappraisalTarget(state, available, rand);
+  if (!targetId) {
+    return { ...state, nextReappraisalAt };
+  }
+
+  const game = gameById(targetId);
+  if (!game) return { ...state, nextReappraisalAt };
+
+  const oldTrueValue = state.trueValues[targetId];
+  const oldMarketRating = state.marketRatingOverrides[targetId] ?? game.marketRating;
+  const { direction, newTrueValue, newMarketRating } = applyReappraisal(
+    game,
+    oldTrueValue,
+    oldMarketRating,
+    rand,
+  );
+
+  const owned = isOwned(state, targetId);
+  const bonus = earlyAdopterBonus(oldTrueValue, newTrueValue, owned, config.EARLY_ADOPTER_MULTIPLIER);
+  const earlyAdopterBonuses = bonus > 0
+    ? { ...state.earlyAdopterBonuses, [targetId]: (state.earlyAdopterBonuses[targetId] ?? 0) + bonus }
+    : state.earlyAdopterBonuses;
+
+  const historyEntry: ReappraisalHistoryEntry = {
+    gameId: targetId,
+    direction,
+    oldTrueValue,
+    newTrueValue,
+    oldMarketRating,
+    newMarketRating,
+    owned,
+    at: now,
+  };
+
+  const announcement: Announcement = {
+    id: `announce-reappraisal-${targetId}-${now}`,
+    kind: 'reappraisal',
+    text: reappraisalText(game.title, direction, owned, bonus),
+    expiresAt: now + config.ANNOUNCEMENT_MS,
+    reappraisal: { owned, direction },
+  };
+
+  return {
+    ...state,
+    trueValues: { ...state.trueValues, [targetId]: newTrueValue },
+    marketRatingOverrides: { ...state.marketRatingOverrides, [targetId]: newMarketRating },
+    earlyAdopterBonuses,
+    reappraisalHistory: [...state.reappraisalHistory, historyEntry],
+    nextReappraisalAt,
     announcements: [...state.announcements, announcement],
   };
 }
@@ -409,7 +507,7 @@ function tick(state: RunState, action: Extract<GameAction, { type: 'TICK' }>, co
     next = startSale(next, now, rand, config);
   }
 
-  // --- Steps 6 + 7: release roll, then priced-out check. --------------------
+  // --- Steps 6-8: release roll, re-appraisal roll, then priced-out check. ---
   //
   // Release runs FIRST, then isPricedOut is evaluated on the result. Unlike
   // the old victory check, a release here can genuinely save the player: it
@@ -421,6 +519,17 @@ function tick(state: RunState, action: Extract<GameAction, { type: 'TICK' }>, co
   if (now >= next.nextReleaseAt) {
     next = rollRelease(next, now, rand, config);
   }
+
+  // Re-appraisal (Task 5) also runs before the priced-out check, for the same reason: it must
+  // never be robbed of visibility by ordering. A re-appraisal doesn't change affordability the
+  // way a release can (marketRating/trueValue don't feed isPricedOut), so it can't rescue a run
+  // the way a release can — but placing it here still guarantees that a re-appraisal firing on
+  // the very tick the run ends is recorded and announced in the resulting terminal state, rather
+  // than being computed against a state that's already moved on.
+  if (now >= next.nextReappraisalAt) {
+    next = rollReappraisal(next, now, rand, config);
+  }
+
   if (isPricedOut(next, now - next.startedAt, config)) {
     next = { ...next, status: 'pricedOut', activeShift: null, endedAt: now };
   }

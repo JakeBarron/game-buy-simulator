@@ -156,10 +156,37 @@ export type PurchaseRecord = {
 
 export type Announcement = {
   id: string;
-  kind: 'sale' | 'release';
+  kind: 'sale' | 'release' | 'reappraisal';
   text: string;
   /** Auto-dismiss; also manually dismissible (FR-024). */
   expiresAt: number;
+  /**
+   * Only set for kind 'reappraisal'. Carries just enough of the event for the toast to style
+   * itself distinctly for each of the four owned/unowned x up/down cases without re-deriving
+   * state (Task 5, Part C).
+   */
+  reappraisal?: { owned: boolean; direction: 'up' | 'down' };
+};
+
+// ---------------------------------------------------------------------------
+// Re-appraisal (Task 5): the crowd changes its mind about a game mid-run.
+// ---------------------------------------------------------------------------
+
+/** One re-appraisal event, permanently recorded. Task 6's regret screen reads this list to show
+ *  the player what they passed on and what it became — so it must be sufficient on its own,
+ *  without needing to re-derive anything from trueValues/marketRatingOverrides. */
+export type ReappraisalHistoryEntry = {
+  gameId: string;
+  direction: 'up' | 'down';
+  oldTrueValue: number;
+  newTrueValue: number;
+  oldMarketRating: number;
+  newMarketRating: number;
+  /** Whether the player owned the game at the moment this fired — that's what early-adopter
+   *  bonus eligibility (and Task 6's regret framing) hinges on. */
+  owned: boolean;
+  /** Epoch ms (TICK's `now`). */
+  at: number;
 };
 
 // ---------------------------------------------------------------------------
@@ -206,6 +233,25 @@ export type RunState = {
   nextSaleAt: number;
   /** Epoch ms of the next release roll. */
   nextReleaseAt: number;
+  /** Epoch ms of the next re-appraisal roll (Task 5). */
+  nextReappraisalAt: number;
+  /**
+   * Per-run override of a game's visible marketRating (catalogue.ts's Game is static, immutable
+   * module data — this is where a re-appraisal's crowd-rating change actually lives). Sparse:
+   * a game with no entry here still shows its catalogue marketRating. Every reader of
+   * marketRating for display or sale weighting must resolve through this, not the raw catalogue
+   * value.
+   */
+  marketRatingOverrides: Record<string, number>;
+  /**
+   * Accumulated early-adopter bonus per game (valuation.earlyAdopterBonus), banked the moment
+   * each qualifying upward re-appraisal fires and never removed — a later downward re-appraisal
+   * of the same game does not claw back a bonus already earned. Added to scoreForValue in
+   * collectionScore.
+   */
+  earlyAdopterBonuses: Record<string, number>;
+  /** Chronological, append-only. See ReappraisalHistoryEntry. */
+  reappraisalHistory: ReappraisalHistoryEntry[];
   /** Set when status leaves 'playing'. */
   endedAt: number | null;
   /** False until the player dismisses the opening screen. Persisted so it

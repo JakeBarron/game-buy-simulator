@@ -21,6 +21,17 @@ export function gameById(gameId: string): Game | undefined {
   return GAMES_BY_ID.get(gameId);
 }
 
+/**
+ * A game's CURRENT marketRating: the crowd's opinion as of `state`, not necessarily what the
+ * static catalogue says. A re-appraisal (Task 5) overrides it per-run in
+ * `state.marketRatingOverrides`; every reader of marketRating for display or sale weighting must
+ * go through this (or the override map directly), never `game.marketRating` on its own, or a
+ * re-appraisal's crowd-rating change would silently fail to show up.
+ */
+export function effectiveMarketRating(state: RunState, gameId: string): number {
+  return state.marketRatingOverrides[gameId] ?? gameById(gameId)?.marketRating ?? 3;
+}
+
 export function storefrontById(id: string): Storefront | undefined {
   return STOREFRONTS_BY_ID.get(id);
 }

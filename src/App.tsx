@@ -8,6 +8,7 @@ import {
   availableListings, canAfford, currentPrice, discountFor,
   gameById, isOwned, listingsForStorefront, restingShiftCost, spacedShiftCost,
   canSurviveRestingShift, totalHoursSpent, runStats, storefrontById, collectionProgress,
+  effectiveMarketRating,
 } from './lib/economy'
 import { collectionScore, scoreForValue } from './lib/valuation'
 import { STOREFRONTS } from './data/catalogue'
@@ -84,7 +85,7 @@ export default function App() {
   const progress = shift ? shiftProgress(shift, now, CONFIG) : null
   const drainPerSecond = shift ? currentDrainRatePerMs(shift, CONFIG) * 1000 : 0
   const spent = totalHoursSpent(state)
-  const score = collectionScore(state.ownedGameIds, state.trueValues)
+  const score = collectionScore(state.ownedGameIds, state.trueValues, state.earlyAdopterBonuses)
 
   // Leaving the work view must release the hold — spacing out requires being
   // at your desk, deliberately (FR-055).
@@ -100,8 +101,11 @@ export default function App() {
     return listingsForStorefront(state, state.activeStorefrontId)
       .filter(l => avail.has(l.id))
       .flatMap(listing => {
-        const game = gameById(listing.gameId)
-        if (!game) return []
+        const baseGame = gameById(listing.gameId)
+        if (!baseGame) return []
+        // marketRating shown to the player is per-run, not the static catalogue value — a
+        // re-appraisal (Task 5) can have moved it since the run started.
+        const game = { ...baseGame, marketRating: effectiveMarketRating(state, baseGame.id) }
         const price = currentPrice(listing, state.activeSale, elapsedMs, CONFIG)
         return [{
           game, listing, price, listPrice: listing.price,
@@ -118,9 +122,12 @@ export default function App() {
       const game = gameById(id)
       if (!game) return []
       const trueValue = state.trueValues[id]
-      return [{ game, trueValue, points: scoreForValue(trueValue) }]
+      // Points include any banked early-adopter bonus (Task 5), so the library's per-game
+      // numbers sum to the same total the header's collection score shows.
+      const points = scoreForValue(trueValue) + (state.earlyAdopterBonuses[id] ?? 0)
+      return [{ game, trueValue, points }]
     }),
-    [state.ownedGameIds, state.trueValues],
+    [state.ownedGameIds, state.trueValues, state.earlyAdopterBonuses],
   )
 
   const historyRows = useMemo(

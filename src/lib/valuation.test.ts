@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   SCORE_CURVE, scoreForValue, rollTrueValue, rollAllTrueValues, collectionScore, selectReviews,
+  pickReappraisalTarget, applyReappraisal, earlyAdopterBonus,
 } from './valuation'
+import { EARLY_ADOPTER_MULTIPLIER } from './config'
 import type { Game, Review } from './types'
 
 // Tiny deterministic PRNG (mulberry32) so statistical tests are reproducible and don't rely on
@@ -218,5 +220,122 @@ describe('selectReviews', () => {
     }
     // A trueValue of 5 should surface 'glowing' far more often than 'damning'.
     expect(glowingCount).toBeGreaterThan(damningCount)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Re-appraisal (Task 5, Part D)
+// ---------------------------------------------------------------------------
+
+describe('applyReappraisal', () => {
+  it('moves true value and market rating by exactly 1 in the SAME direction, always clamped to 1-5, over many seeded rolls', () => {
+    const rand = mulberry32(77)
+    for (let i = 0; i < SAMPLE_SIZE; i++) {
+      // Cheap deterministic-from-rand setup values, not part of what's under test.
+      const trueValue = 1 + Math.floor(rand() * 5)
+      const marketRating = 1 + Math.floor(rand() * 5)
+      const game = makeGame({ traits: [], marketRating })
+
+      const result = applyReappraisal(game, trueValue, marketRating, rand)
+
+      expect(['up', 'down']).toContain(result.direction)
+      const delta = result.direction === 'up' ? 1 : -1
+
+      expect(result.newTrueValue).toBe(Math.min(5, Math.max(1, trueValue + delta)))
+      expect(result.newMarketRating).toBe(Math.min(5, Math.max(1, marketRating + delta)))
+      expect(result.newTrueValue).toBeGreaterThanOrEqual(1)
+      expect(result.newTrueValue).toBeLessThanOrEqual(5)
+      expect(result.newMarketRating).toBeGreaterThanOrEqual(1)
+      expect(result.newMarketRating).toBeLessThanOrEqual(5)
+    }
+  })
+})
+
+describe('pickReappraisalTarget + applyReappraisal: boundary respected', () => {
+  it('a game already at true value 5 is never moved up, and one already at 1 is never moved down, over many seeded picks', () => {
+    const maxed = makeGame({ id: 'maxed', traits: [], marketRating: 5 })
+    const bottomed = makeGame({ id: 'bottomed', traits: [], marketRating: 1 })
+    const games = [maxed, bottomed]
+    const trueValues = { maxed: 5, bottomed: 1 }
+    const rand = mulberry32(55)
+
+    let sawMaxed = false
+    let sawBottomed = false
+    for (let i = 0; i < 1000; i++) {
+      const targetId = pickReappraisalTarget({ trueValues }, games, rand)
+      expect(targetId).not.toBeNull()
+      const game = targetId === 'maxed' ? maxed : bottomed
+      const trueValue = targetId === 'maxed' ? 5 : 1
+
+      const result = applyReappraisal(game, trueValue, game.marketRating, rand)
+
+      if (targetId === 'maxed') {
+        sawMaxed = true
+        expect(result.direction).toBe('down') // never 'up' — already at the boundary
+      } else {
+        sawBottomed = true
+        expect(result.direction).toBe('up') // never 'down' — already at the boundary
+      }
+    }
+    // Sanity: both branches of the assertion above actually ran.
+    expect(sawMaxed).toBe(true)
+    expect(sawBottomed).toBe(true)
+  })
+})
+
+describe('pickReappraisalTarget: trait weighting is real', () => {
+  it('over >=2000 seeded picks, cult games are re-appraised UP more often than hype games, by a margin well outside noise', () => {
+    const cultGame = makeGame({ id: 'cult-game', traits: ['cult'], marketRating: 3 })
+    const hypeGame = makeGame({ id: 'hype-game', traits: ['hype'], marketRating: 3 })
+    const games = [cultGame, hypeGame]
+    const trueValues = { 'cult-game': 3, 'hype-game': 3 }
+    const rand = mulberry32(303)
+
+    let cultUp = 0
+    let hypeUp = 0
+    for (let i = 0; i < SAMPLE_SIZE; i++) {
+      const targetId = pickReappraisalTarget({ trueValues }, games, rand)
+      const game = targetId === 'cult-game' ? cultGame : hypeGame
+      const trueValue = trueValues[targetId as keyof typeof trueValues]
+      const result = applyReappraisal(game, trueValue, game.marketRating, rand)
+      if (targetId === 'cult-game' && result.direction === 'up') cultUp++
+      if (targetId === 'hype-game' && result.direction === 'up') hypeUp++
+    }
+
+    // The two games are picked as often as each other (roughly symmetric total weight), but
+    // conditioned on being picked, cult should go up far more often than hype does.
+    expect(cultUp).toBeGreaterThan(hypeUp * 3)
+  })
+})
+
+describe('earlyAdopterBonus', () => {
+  it('doubles the GAIN, not the total: a 3-star -> 4-star move (curve 8 -> 20) yields 12 extra for an owner, not 40', () => {
+    const bonus = earlyAdopterBonus(3, 4, true, 2)
+    expect(bonus).toBe(12)
+    expect(bonus).not.toBe(40)
+    // Also true at the configured default multiplier.
+    expect(earlyAdopterBonus(3, 4, true, EARLY_ADOPTER_MULTIPLIER)).toBe(12)
+  })
+
+  it('awards no bonus for an unowned game, even on an upward move', () => {
+    expect(earlyAdopterBonus(3, 4, false, 2)).toBe(0)
+  })
+
+  it('awards no bonus for a downward move, even when owned', () => {
+    expect(earlyAdopterBonus(4, 3, true, 2)).toBe(0)
+  })
+})
+
+describe('collectionScore with early-adopter bonuses', () => {
+  it('equals curve value plus accumulated bonuses, after several re-appraisals', () => {
+    const trueValues = { a: 4, b: 2, c: 1 }
+    const bonuses = { a: 12, c: 0 } // b never re-appraised, c re-appraised but with no bonus banked
+    const expected = scoreForValue(4) + 12 + scoreForValue(2) + scoreForValue(1) + 0
+    expect(collectionScore(['a', 'b', 'c'], trueValues, bonuses)).toBe(expected)
+  })
+
+  it('defaults to no bonus when the argument is omitted, matching pre-Task-5 behaviour', () => {
+    const trueValues = { a: 4, b: 2 }
+    expect(collectionScore(['a', 'b'], trueValues)).toBe(scoreForValue(4) + scoreForValue(2))
   })
 })

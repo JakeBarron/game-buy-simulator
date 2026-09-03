@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { gameReducer, initialRun } from './gameReducer'
 import { loadConfig } from './config'
+import { earlyAdopterBonus } from './valuation'
 import { GAMES } from '../data/catalogue'
 import type { RunState, Shift, Puzzle } from './types'
 
@@ -30,10 +31,11 @@ describe('TICK: pricedOut transition', () => {
     const broke: RunState = {
       ...freshRun(),
       hoursRemaining: 0,
-      // Isolate the priced-out mechanic from sale/release rolls, which are
+      // Isolate the priced-out mechanic from sale/release/re-appraisal rolls, which are
       // orthogonal to what this test checks.
       nextSaleAt: Number.MAX_SAFE_INTEGER,
       nextReleaseAt: Number.MAX_SAFE_INTEGER,
+      nextReappraisalAt: Number.MAX_SAFE_INTEGER,
     }
 
     const early = gameReducer(broke, { type: 'TICK', now: 0, dt: 0, rand: mulberry32(2) }, config)
@@ -72,6 +74,7 @@ describe('TICK: death by drain takes precedence', () => {
       activeShift: shift,
       nextSaleAt: Number.MAX_SAFE_INTEGER,
       nextReleaseAt: Number.MAX_SAFE_INTEGER,
+      nextReappraisalAt: Number.MAX_SAFE_INTEGER,
     }
 
     // wallMs = 10ms of work-time elapsed, drain = 2 * 10 = 20 >= balanceAtStart(10) -> dead,
@@ -108,6 +111,7 @@ describe('TICK step order: release resolves before the priced-out check', () => 
       ownedGameIds: [...startingIds, ...otherReleaseIds],
       releasedGameIds: [...otherReleaseIds],
       nextSaleAt: Number.MAX_SAFE_INTEGER,
+      nextReappraisalAt: Number.MAX_SAFE_INTEGER, // isolate from the re-appraisal roll too
     }
 
     // Release is due this tick (nextReleaseAt <= now): the rescuer lands, the unowned set is
@@ -139,6 +143,7 @@ describe('sale weighting (Part D)', () => {
       ...base,
       nextSaleAt: 0,
       nextReleaseAt: Number.MAX_SAFE_INTEGER, // isolate the sale roll from release rolls
+      nextReappraisalAt: Number.MAX_SAFE_INTEGER, // ...and from the re-appraisal roll
     }
 
     // Restricted to non-releasePool games so every id here is actually eligible for a sale in
@@ -175,5 +180,135 @@ describe('sale weighting (Part D)', () => {
     // isn't the weight ratio directly once you account for without-replacement sampling
     // against the whole eligible pool).
     expect(oneStarRate).toBeGreaterThan(fiveStarRate * 2)
+  })
+})
+
+describe('TICK: re-appraisal wiring (Task 5)', () => {
+  it('fires when due: updates trueValues/marketRatingOverrides, records history, pushes an announcement, and reschedules', () => {
+    const base = freshRun()
+    const due: RunState = {
+      ...base,
+      nextSaleAt: Number.MAX_SAFE_INTEGER,
+      nextReleaseAt: Number.MAX_SAFE_INTEGER,
+      nextReappraisalAt: 0,
+    }
+    const now = 1_000
+
+    const result = gameReducer(due, { type: 'TICK', now, dt: now, rand: mulberry32(9) }, config)
+
+    expect(result.reappraisalHistory).toHaveLength(1)
+    const entry = result.reappraisalHistory[0]
+    expect(entry.at).toBe(now)
+    expect(['up', 'down']).toContain(entry.direction)
+    // Fresh run owns nothing yet, so this is always an unowned event.
+    expect(entry.owned).toBe(false)
+
+    // The history entry's new values are exactly what landed in the live state.
+    expect(result.trueValues[entry.gameId]).toBe(entry.newTrueValue)
+    expect(result.marketRatingOverrides[entry.gameId]).toBe(entry.newMarketRating)
+    expect(entry.oldTrueValue).toBe(base.trueValues[entry.gameId])
+
+    const announcement = result.announcements.find((a) => a.kind === 'reappraisal')
+    expect(announcement).toBeDefined()
+    expect(announcement?.reappraisal).toEqual({ owned: false, direction: entry.direction })
+    expect(announcement?.text).toContain('re-rated')
+
+    // Rescheduled within the configured interval from `now`, not from the run's start.
+    expect(result.nextReappraisalAt).toBeGreaterThanOrEqual(now + config.REAPPRAISAL_INTERVAL_MS.min)
+    expect(result.nextReappraisalAt).toBeLessThanOrEqual(now + config.REAPPRAISAL_INTERVAL_MS.max)
+
+    // Unowned upward move: no bonus banked (only the owned+up case earns one).
+    if (entry.direction === 'up') {
+      expect(result.earlyAdopterBonuses[entry.gameId]).toBeUndefined()
+    }
+  })
+})
+
+describe('TICK step order: re-appraisal resolves before the priced-out check', () => {
+  it('records a same-tick re-appraisal even when the tick also ends the run as pricedOut, so its effects are not lost to ordering', () => {
+    const broke: RunState = {
+      ...freshRun(),
+      hoursRemaining: 0,
+      nextSaleAt: Number.MAX_SAFE_INTEGER,
+      nextReleaseAt: Number.MAX_SAFE_INTEGER,
+      nextReappraisalAt: 0, // due this tick, unlike the isolated pricedOut-transition test above
+    }
+
+    const result = gameReducer(
+      broke,
+      { type: 'TICK', now: 45 * 60_000, dt: 45 * 60_000, rand: mulberry32(3) },
+      config,
+    )
+
+    expect(result.status).toBe('pricedOut')
+    expect(result.reappraisalHistory).toHaveLength(1)
+    expect(result.announcements.some((a) => a.kind === 'reappraisal')).toBe(true)
+  })
+})
+
+describe('TICK: early-adopter bonus honors ownership (Task 5)', () => {
+  it('credits the bonus only when the re-appraised game is owned, and only on an upward move', () => {
+    const base = freshRun()
+    // A mid-range, trait-neutral game (grind/prestige only pull the up/down weighting 50/50,
+    // per REAPPRAISAL_TRAIT_WEIGHT — a heavily-biased trait like hype would make one branch too
+    // rare to reliably observe in a bounded number of trials) and not already at a true-value
+    // boundary, so both an owned-up and an owned-down outcome are reachable across seeds.
+    const ownedId = GAMES.find(
+      (g) =>
+        !g.releasePool &&
+        g.traits.every((t) => t === 'grind' || t === 'prestige') &&
+        base.trueValues[g.id] > 1 &&
+        base.trueValues[g.id] < 5,
+    )!.id
+
+    const owning: RunState = {
+      ...base,
+      hoursRemaining: 100_000, // affordability/pricedOut isn't what's under test
+      ownedGameIds: [ownedId],
+      nextSaleAt: Number.MAX_SAFE_INTEGER,
+      nextReleaseAt: Number.MAX_SAFE_INTEGER,
+    }
+
+    let sawOwnedUpWithBonus = false
+    let sawOwnedDownNoBonus = false
+    let sawOtherUpNoBonus = false
+
+    const TRIALS = 500
+    for (let seed = 0; seed < TRIALS; seed++) {
+      const due: RunState = { ...owning, nextReappraisalAt: 0 }
+      const result = gameReducer(
+        due,
+        { type: 'TICK', now: 1_000, dt: 1_000, rand: mulberry32(seed * 131 + 17) },
+        config,
+      )
+      const entry = result.reappraisalHistory[0]
+      if (!entry) continue
+
+      if (entry.gameId === ownedId) {
+        expect(entry.owned).toBe(true)
+        if (entry.direction === 'up') {
+          const expectedBonus = earlyAdopterBonus(
+            entry.oldTrueValue,
+            entry.newTrueValue,
+            true,
+            config.EARLY_ADOPTER_MULTIPLIER,
+          )
+          expect(result.earlyAdopterBonuses[ownedId]).toBe(expectedBonus)
+          if (expectedBonus > 0) sawOwnedUpWithBonus = true
+        } else {
+          expect(result.earlyAdopterBonuses[ownedId] ?? 0).toBe(0)
+          sawOwnedDownNoBonus = true
+        }
+      } else {
+        expect(entry.owned).toBe(false)
+        expect(result.earlyAdopterBonuses[entry.gameId]).toBeUndefined()
+        if (entry.direction === 'up') sawOtherUpNoBonus = true
+      }
+    }
+
+    // Sanity: every branch of the assertions above actually ran at least once over 500 trials.
+    expect(sawOwnedUpWithBonus).toBe(true)
+    expect(sawOwnedDownNoBonus).toBe(true)
+    expect(sawOtherUpNoBonus).toBe(true)
   })
 })

@@ -8,7 +8,7 @@
 // PURITY: no React, no Date.now(), no Math.random(), no storage. Randomness always arrives as
 // an injected `rand: () => number` so a run's rolls are reproducible and testable.
 
-import type { Game, GameTrait, Review, ReviewSentiment } from './types';
+import type { Game, GameTrait, Review, ReviewSentiment, RunState } from './types';
 
 // ---------------------------------------------------------------------------
 // Scoring curve
@@ -132,14 +132,21 @@ export function rollAllTrueValues(games: Game[], rand: () => number): Record<str
   return result;
 }
 
-/** Sum of `scoreForValue` over every owned game. 0 for an empty collection. */
+/**
+ * Sum of `scoreForValue` over every owned game, plus each game's accumulated early-adopter
+ * bonus (Task 5) — a game's contribution is its curve value PLUS whatever conviction bonus it
+ * has banked, not just the curve. `earlyAdopterBonuses` defaults to empty so pre-Task-5 callers
+ * (and every existing test) keep working unchanged. 0 for an empty collection.
+ */
 export function collectionScore(
   ownedGameIds: string[],
   trueValues: Record<string, number>,
+  earlyAdopterBonuses: Record<string, number> = {},
 ): number {
   return ownedGameIds.reduce((sum, id) => {
     const trueValue = trueValues[id];
-    return trueValue === undefined ? sum : sum + scoreForValue(trueValue);
+    if (trueValue === undefined) return sum;
+    return sum + scoreForValue(trueValue) + (earlyAdopterBonuses[id] ?? 0);
   }, 0);
 }
 
@@ -227,4 +234,149 @@ export function selectReviews(
   }
 
   return selected.map((item) => item.review);
+}
+
+// ---------------------------------------------------------------------------
+// Re-appraisal (Task 5): the crowd changes its mind mid-run.
+// ---------------------------------------------------------------------------
+//
+// A re-appraisal moves BOTH the visible marketRating and the hidden trueValue of one game by 1,
+// in the same direction, clamped to 1-5. Direction is trait-weighted the same way the initial
+// true-value roll is trait-biased (see TRAIT_CENTER_BIAS above): cult/contemplative games skew
+// toward being re-rated UP, hype/annual-sequel toward DOWN, early-access swings hard either way,
+// and asset-flip (already capped at 4 by the initial roll) leans down but isn't locked out of
+// recovering. grind/prestige stay neutral, same as in the initial roll.
+
+export type ReappraisalDirection = 'up' | 'down';
+
+/**
+ * Directional pull per trait, as a weight ABOVE the neutral baseline of 1 (mirrors
+ * TRAIT_CENTER_BIAS's additive-sum style, just multiplicative-flavoured): a game's weight for
+ * a direction is `1 + sum(REAPPRAISAL_TRAIT_WEIGHT[trait][direction] - 1)` over its traits, so a
+ * trait-less game gets exactly 1 or an even multi-trait game gets a nudged sum without ever
+ * requiring a single trait to double-count against the baseline.
+ */
+const REAPPRAISAL_TRAIT_WEIGHT: Record<GameTrait, { up: number; down: number }> = {
+  cult: { up: 3, down: 0.4 },
+  contemplative: { up: 2.2, down: 0.5 },
+  hype: { up: 0.4, down: 3 },
+  'annual-sequel': { up: 0.5, down: 2.2 },
+  'asset-flip': { up: 0.5, down: 1.6 },
+  'early-access': { up: 1.8, down: 1.8 },
+  grind: { up: 1, down: 1 },
+  prestige: { up: 1, down: 1 },
+};
+
+/** Floor so a heavily-opposed trait combination never zeroes a direction out entirely — it
+ *  should be rare, not impossible. */
+const MIN_REAPPRAISAL_WEIGHT = 0.05;
+
+function reappraisalDirectionWeight(game: Game, direction: ReappraisalDirection): number {
+  let weight = 1;
+  for (const trait of game.traits) {
+    weight += REAPPRAISAL_TRAIT_WEIGHT[trait][direction] - 1;
+  }
+  return Math.max(weight, MIN_REAPPRAISAL_WEIGHT);
+}
+
+/**
+ * A game's total pull toward being THIS event's target, regardless of which way it would move —
+ * the sum of both directions' weight, with a direction's contribution zeroed out once its true
+ * value has already reached the boundary it would move toward (a 5 can't go up; a 1 can't go
+ * down). A game at neither boundary is eligible either way and gets both weights summed, which is
+ * why a cult game (heavily up-weighted, lightly down-weighted) still shows up reasonably often —
+ * just mostly to be moved up.
+ */
+function reappraisalSelectionWeight(game: Game, trueValue: number): number {
+  const upWeight = trueValue < 5 ? reappraisalDirectionWeight(game, 'up') : 0;
+  const downWeight = trueValue > 1 ? reappraisalDirectionWeight(game, 'down') : 0;
+  return upWeight + downWeight;
+}
+
+/**
+ * Chooses which game gets re-appraised this event, weighted by trait (see above) and excluding
+ * any game with no trueValue on record. Returns null only when `games` yields no eligible
+ * candidate at all (e.g. an empty list) — in practice, with more than one value 1-5 in play,
+ * there is always at least one direction open for every game, so this is mostly a defensive
+ * fallback rather than something a real run hits.
+ */
+export function pickReappraisalTarget(
+  state: Pick<RunState, 'trueValues'>,
+  games: Game[],
+  rand: () => number,
+): string | null {
+  const eligible: Game[] = [];
+  const weights: number[] = [];
+  for (const game of games) {
+    const trueValue = state.trueValues[game.id];
+    if (trueValue === undefined) continue;
+    const weight = reappraisalSelectionWeight(game, trueValue);
+    if (weight <= 0) continue;
+    eligible.push(game);
+    weights.push(weight);
+  }
+  if (eligible.length === 0) return null;
+
+  const index = weightedPickIndex(weights, rand);
+  return eligible[index].id;
+}
+
+/**
+ * Moves `currentTrueValue` and `currentMarketRating` by 1 in the same direction, clamped to 1-5.
+ * Direction is forced when the game's true value already sits at the boundary that direction
+ * would move toward (never rolls a no-op "up" for a value-5 game); otherwise it's a trait-weighted
+ * coin flip via `reappraisalDirectionWeight`, consuming exactly one `rand()` draw. When only the
+ * true value is at a boundary but the market rating isn't (or vice versa), the market rating
+ * still gets clamped independently — the two need not have started at the same star.
+ */
+export function applyReappraisal(
+  game: Game,
+  currentTrueValue: number,
+  currentMarketRating: number,
+  rand: () => number,
+): { direction: ReappraisalDirection; newTrueValue: number; newMarketRating: number } {
+  const canGoUp = currentTrueValue < 5;
+  const canGoDown = currentTrueValue > 1;
+
+  let direction: ReappraisalDirection;
+  if (canGoUp && canGoDown) {
+    const upWeight = reappraisalDirectionWeight(game, 'up');
+    const downWeight = reappraisalDirectionWeight(game, 'down');
+    direction = rand() * (upWeight + downWeight) < upWeight ? 'up' : 'down';
+  } else if (canGoUp) {
+    direction = 'up';
+  } else {
+    // canGoDown must be true here: a value already clamped to 1-5 always has at least one
+    // direction open (a value can only fail both canGoUp and canGoDown if it's simultaneously
+    // >=5 and <=1, which is impossible).
+    direction = 'down';
+  }
+
+  const delta = direction === 'up' ? 1 : -1;
+  const clamp = (v: number) => Math.min(5, Math.max(1, v + delta));
+  return {
+    direction,
+    newTrueValue: clamp(currentTrueValue),
+    newMarketRating: clamp(currentMarketRating),
+  };
+}
+
+/**
+ * The early-adopter payoff: 2x (config.EARLY_ADOPTER_MULTIPLIER) on the GAIN from an upward
+ * re-appraisal, not on the whole curve value — a 3->4 move (curve 8->20, gain 12) credits an
+ * owner 12 EXTRA points (on top of the 12 the curve already gives via the updated trueValue),
+ * for 24 total effective gain, never the naive-and-wrong "double the new score" (40). Returns 0
+ * whenever the game wasn't owned at the time, or the move wasn't a gain (a downward
+ * re-appraisal, or — defensively — any non-positive delta).
+ */
+export function earlyAdopterBonus(
+  oldTrueValue: number,
+  newTrueValue: number,
+  owned: boolean,
+  multiplier: number,
+): number {
+  if (!owned) return 0;
+  const gain = scoreForValue(newTrueValue) - scoreForValue(oldTrueValue);
+  if (gain <= 0) return 0;
+  return gain * (multiplier - 1);
 }
