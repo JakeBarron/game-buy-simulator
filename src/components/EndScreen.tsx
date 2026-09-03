@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { hoursWhole } from '../lib/format';
 export function EndScreen(props: {
   status: 'dead' | 'won';
@@ -8,6 +9,14 @@ export function EndScreen(props: {
   onRestart: () => void;
 }) {
   const isDead = props.status === 'dead';
+  const restartButtonRef = useRef<HTMLButtonElement>(null);
+
+  // Move focus into the overlay as soon as it opens, so keyboard users land
+  // somewhere sensible instead of wherever focus happened to be when the
+  // background (now inert) went away.
+  useEffect(() => {
+    restartButtonRef.current?.focus();
+  }, []);
 
   return (
     <div className="fixed inset-0 bg-slate-950/95 flex items-center justify-center z-50">
@@ -76,6 +85,7 @@ export function EndScreen(props: {
 
         {/* Restart Button */}
         <button
+          ref={restartButtonRef}
           onClick={props.onRestart}
           className={`
             px-8 py-4 rounded-lg font-semibold text-lg

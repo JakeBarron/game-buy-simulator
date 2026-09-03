@@ -5,6 +5,7 @@ export function NavBar(props: {
   onChange: (view: View) => void;
   onRestart: () => void;
   shiftActive: boolean;
+  status: 'playing' | 'dead' | 'won';
 }) {
   const views: Array<{ id: View; label: string }> = [
     { id: 'store', label: 'Store' },
@@ -38,15 +39,18 @@ export function NavBar(props: {
           ))}
         </div>
 
-        {/* Give Up Button */}
-        <button
-          onClick={props.onRestart}
-          className="px-3 py-1.5 text-xs text-slate-500 hover:text-slate-400 transition-colors rounded border border-slate-700 hover:border-slate-600 hover:bg-slate-800/30"
-          aria-label="Give up and restart"
-          title="Abandon this run"
-        >
-          Give up
-        </button>
+        {/* Give Up Button — only reachable mid-run; once the run has ended,
+            RESTART is offered exclusively via the EndScreen's own button. */}
+        {props.status === 'playing' && (
+          <button
+            onClick={props.onRestart}
+            className="px-3 py-1.5 text-xs text-slate-500 hover:text-slate-400 transition-colors rounded border border-slate-700 hover:border-slate-600 hover:bg-slate-800/30"
+            aria-label="Give up and restart"
+            title="Abandon this run"
+          >
+            Give up
+          </button>
+        )}
       </div>
     </nav>
   );

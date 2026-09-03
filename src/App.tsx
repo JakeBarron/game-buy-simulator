@@ -102,64 +102,76 @@ export default function App() {
 
   const stats = runStats(state, now)
 
+  // Welcome and EndScreen are mutually exclusive full-screen overlays (see
+  // their own gates below). Whenever either is open, everything else on the
+  // page is background content: it must not be focusable or clickable, so
+  // Tab can never land on (and Enter/Space never activate) a control hidden
+  // underneath the overlay.
+  const welcomeVisible = !state.welcomeSeen && state.status === 'playing'
+  const endScreenVisible = state.status !== 'playing'
+  const overlayOpen = welcomeVisible || endScreenVisible
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
-      <HoursHeader
-        hoursRemaining={state.hoursRemaining}
-        shiftRemainingMs={progress ? progress.remainingMs : null}
-        spacingOut={shift?.spacingOut ?? false}
-        drainPerSecond={drainPerSecond}
-        owned={progressCounts.owned}
-        available={progressCounts.available}
-        cannotAffordShift={!canSurviveRestingShift(state, CONFIG)}
-      />
-      <NavBar
-        view={view}
-        onChange={setView}
-        onRestart={() => dispatch({ type: 'RESTART', now: Date.now() })}
-        shiftActive={!!shift}
-      />
+      <div inert={overlayOpen}>
+        <HoursHeader
+          hoursRemaining={state.hoursRemaining}
+          shiftRemainingMs={progress ? progress.remainingMs : null}
+          spacingOut={shift?.spacingOut ?? false}
+          drainPerSecond={drainPerSecond}
+          owned={progressCounts.owned}
+          available={progressCounts.available}
+          cannotAffordShift={!canSurviveRestingShift(state, CONFIG)}
+        />
+        <NavBar
+          view={view}
+          onChange={setView}
+          onRestart={() => dispatch({ type: 'RESTART', now: Date.now() })}
+          shiftActive={!!shift}
+          status={state.status}
+        />
 
-      <main className="max-w-7xl mx-auto p-6">
-        {view === 'store' && (
-          <StoreView
-            storefronts={STOREFRONTS}
-            activeStorefrontId={state.activeStorefrontId}
-            onSelectStorefront={id => dispatch({ type: 'SET_STOREFRONT', storefrontId: id })}
-            listings={storeListings}
-            onBuy={listingId => dispatch({ type: 'BUY', listingId, now: Date.now() })}
-          />
-        )}
-        {view === 'work' && (
-          <WorkView
-            puzzle={shift?.puzzle ?? null}
-            puzzleSolved={shift?.puzzleSolvedAt != null}
-            shiftActive={!!shift}
-            remainingMs={progress?.remainingMs ?? 0}
-            fraction={progress?.fraction ?? 0}
-            spacingOut={shift?.spacingOut ?? false}
-            drainPerSecond={drainPerSecond}
-            hoursRemaining={state.hoursRemaining}
-            restingCost={restingShiftCost(CONFIG)}
-            spacedCost={spacedShiftCost(CONFIG)}
-            onStartShift={() =>
-              dispatch({ type: 'START_SHIFT', puzzle: makePuzzle(Math.random), now: Date.now() })}
-            onSolvePuzzle={answer =>
-              dispatch({ type: 'SOLVE_PUZZLE', answer, now: Date.now() })}
-            onSetSpacingOut={v =>
-              dispatch({ type: 'SET_SPACING_OUT', spacingOut: v, now: Date.now() })}
-          />
-        )}
-        {view === 'library' && <LibraryView games={ownedGames} totalHoursSpent={spent} />}
-        {view === 'history' && <HistoryView records={historyRows} totalHoursSpent={spent} />}
-      </main>
+        <main className="max-w-7xl mx-auto p-6">
+          {view === 'store' && (
+            <StoreView
+              storefronts={STOREFRONTS}
+              activeStorefrontId={state.activeStorefrontId}
+              onSelectStorefront={id => dispatch({ type: 'SET_STOREFRONT', storefrontId: id })}
+              listings={storeListings}
+              onBuy={listingId => dispatch({ type: 'BUY', listingId, now: Date.now() })}
+            />
+          )}
+          {view === 'work' && (
+            <WorkView
+              puzzle={shift?.puzzle ?? null}
+              puzzleSolved={shift?.puzzleSolvedAt != null}
+              shiftActive={!!shift}
+              remainingMs={progress?.remainingMs ?? 0}
+              fraction={progress?.fraction ?? 0}
+              spacingOut={shift?.spacingOut ?? false}
+              drainPerSecond={drainPerSecond}
+              hoursRemaining={state.hoursRemaining}
+              restingCost={restingShiftCost(CONFIG)}
+              spacedCost={spacedShiftCost(CONFIG)}
+              onStartShift={() =>
+                dispatch({ type: 'START_SHIFT', puzzle: makePuzzle(Math.random), now: Date.now() })}
+              onSolvePuzzle={answer =>
+                dispatch({ type: 'SOLVE_PUZZLE', answer, now: Date.now() })}
+              onSetSpacingOut={v =>
+                dispatch({ type: 'SET_SPACING_OUT', spacingOut: v, now: Date.now() })}
+            />
+          )}
+          {view === 'library' && <LibraryView games={ownedGames} totalHoursSpent={spent} />}
+          {view === 'history' && <HistoryView records={historyRows} totalHoursSpent={spent} />}
+        </main>
 
-      <AnnouncementStack
-        announcements={state.announcements}
-        onDismiss={id => dispatch({ type: 'DISMISS_ANNOUNCEMENT', id })}
-      />
+        <AnnouncementStack
+          announcements={state.announcements}
+          onDismiss={id => dispatch({ type: 'DISMISS_ANNOUNCEMENT', id })}
+        />
+      </div>
 
-      {!state.welcomeSeen && state.status === 'playing' && (
+      {welcomeVisible && (
         <Welcome
           startingHours={CONFIG.STARTING_HOURS}
           restingCost={restingShiftCost(CONFIG)}
