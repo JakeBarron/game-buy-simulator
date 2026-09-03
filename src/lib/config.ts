@@ -1,9 +1,9 @@
 // Tuning constants for Game Buy Simulator.
 // See specs/001-game-buy-simulator/data-model.md for the reference values.
 
-// Bumped for Task 3: RunState gained trueValues/displayedReviews, and initialRun's signature
-// changed (rand is now required) — an old save is not shaped like a current one.
-export const SCHEMA_VERSION = 4;
+// Bumped for Task 4: RunStatus dropped 'won' in favor of 'pricedOut' — an old save carrying
+// status: 'won' is not shaped like a current one.
+export const SCHEMA_VERSION = 5;
 // Tuned by play (T051). The starting catalogue costs 1253 hours at cheapest
 // prices, so the original 1500-hour start let the player buy everything before
 // ever working - the loop never engaged. 600 forces work early while leaving
@@ -20,6 +20,13 @@ export const WAGE = 150;
 export const MIN_PRICE = 1;
 export const TICK_MS = 100;
 export const ANNOUNCEMENT_MS = 6000;
+/**
+ * Elapsed ms for a store's base inflation to double (`inflationMultiplier` in
+ * inflation.ts): 2 ** (storeRate * elapsedMs / INFLATION_DOUBLING_MS). A
+ * storefront's `inflationRate` scales the exponent, so a faster store
+ * doubles proportionally sooner than this baseline. Task 7 will tune this.
+ */
+export const INFLATION_DOUBLING_MS = 150_000;
 
 export type Range = { min: number; max: number };
 
@@ -41,6 +48,7 @@ export type Config = {
   MIN_PRICE: number;
   TICK_MS: number;
   ANNOUNCEMENT_MS: number;
+  INFLATION_DOUBLING_MS: number;
   SALE_INTERVAL_MS: Range;
   SALE_DURATION_MS: Range;
   SALE_DISCOUNT_PCT: Range;
@@ -76,6 +84,7 @@ export function loadConfig(search: string, isProd: boolean): Config {
     MIN_PRICE,
     TICK_MS,
     ANNOUNCEMENT_MS,
+    INFLATION_DOUBLING_MS,
     SALE_INTERVAL_MS: divideRange(SALE_INTERVAL_MS, factor),
     SALE_DURATION_MS: divideRange(SALE_DURATION_MS, factor),
     SALE_DISCOUNT_PCT,

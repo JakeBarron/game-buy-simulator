@@ -15,7 +15,9 @@ import type {
 } from './types';
 import type { Config, Range } from './config';
 import { shiftProgress, shiftDrain, accrueBonus } from './timeEngine';
-import { currentPrice, discountFor, isOwned, hasWon, availableListings } from './economy';
+import {
+  currentPrice, discountFor, isOwned, isPricedOut, availableListings, gameById,
+} from './economy';
 import { rollAllTrueValues, selectReviews } from './valuation';
 import { GAMES, LISTINGS, STOREFRONTS, SALE_NAMES } from '../data/catalogue';
 import { checkAnswer } from './puzzles';
@@ -44,13 +46,35 @@ function pickIndex<T>(items: T[], rand: () => number): T {
   return items[index];
 }
 
-function shuffleWithRand<T>(items: T[], rand: () => number): T[] {
-  const result = [...items];
-  for (let i = result.length - 1; i > 0; i--) {
-    const j = Math.floor(rand() * (i + 1));
-    [result[i], result[j]] = [result[j], result[i]];
-  }
-  return result;
+/**
+ * Weight a listing inversely to its game's marketRating: a 5* game is
+ * markedly less likely to be chosen for a sale than a 1* game. Squaring the
+ * (6 - rating) spread makes that skew pronounced rather than mild — a 1*
+ * game is 25x as likely to be picked as a 5* game, all else equal.
+ */
+function saleWeightFor(listing: Listing): number {
+  const rating = gameById(listing.gameId)?.marketRating ?? 3;
+  return (6 - rating) ** 2;
+}
+
+/**
+ * Weighted shuffle without replacement (Efraimidis-Spirakis A-Res): each
+ * item gets a key of log(rand()) / weight, and sorting descending by that
+ * key yields a random ordering where higher-weight items tend to sort
+ * first — without ever drawing an item twice. Taking the top N of the
+ * result is then a weighted sample of N distinct items. Entirely driven by
+ * the injected `rand`, so it stays deterministic/replayable like every
+ * other roll in this file.
+ */
+function weightedShuffle<T>(items: T[], weightOf: (item: T) => number, rand: () => number): T[] {
+  return items
+    .map((item) => {
+      const weight = Math.max(weightOf(item), 1e-9);
+      const u = Math.max(rand(), 1e-9); // avoid log(0) = -Infinity
+      return { item, key: Math.log(u) / weight };
+    })
+    .sort((a, b) => b.key - a.key)
+    .map(({ item }) => item);
 }
 
 // ---------------------------------------------------------------------------
@@ -112,7 +136,7 @@ function buy(state: RunState, action: Extract<GameAction, { type: 'BUY' }>, conf
   const listing = LISTINGS_BY_ID.get(action.listingId);
   if (!listing || isOwned(state, listing.gameId)) return state;
 
-  const price = currentPrice(listing, state.activeSale, config);
+  const price = currentPrice(listing, state.activeSale, action.now - state.startedAt, config);
   if (price > state.hoursRemaining) return state; // never overdraft
 
   const discountPercent = discountFor(listing, state.activeSale);
@@ -146,14 +170,17 @@ function buy(state: RunState, action: Extract<GameAction, { type: 'BUY' }>, conf
   };
 
   // Re-check terminal states after the purchase. Dead takes priority over
-  // won when a purchase spends the player's exact last hours on the final
-  // unowned game (balance hits 0 counts as game over per spec Edge Cases).
+  // priced-out when a purchase spends the player's exact last hours on the
+  // final unowned game (balance hits 0 counts as game over per spec Edge
+  // Cases). Buying the last available game also empties the unowned set,
+  // which isPricedOut treats as game over too (see its null-price branch) —
+  // the catalogue-exhausted ending.
   if (next.hoursRemaining <= 0) {
     next = { ...next, status: 'dead', hoursRemaining: 0, activeShift: null, endedAt: action.now };
-  } else if (hasWon(next)) {
-    // "Player wins while a shift is still running: the shift stops and the
-    // victory screen takes over" (spec Edge Cases) — applies here too.
-    next = { ...next, status: 'won', activeShift: null, endedAt: action.now };
+  } else if (isPricedOut(next, action.now - next.startedAt, config)) {
+    // A shift still running when the run ends stops immediately (spec Edge
+    // Cases, carried over from the old victory check) — applies here too.
+    next = { ...next, status: 'pricedOut', activeShift: null, endedAt: action.now };
   }
 
   return next;
@@ -224,10 +251,12 @@ function startSale(state: RunState, now: number, rand: () => number, config: Con
     return { ...state, nextSaleAt };
   }
 
-  const shuffled = shuffleWithRand(listings, rand);
+  // Weighted, not uniform: highly-rated games go on sale less often (see
+  // saleWeightFor).
+  const weighted = weightedShuffle(listings, saleWeightFor, rand);
   const fraction = pickInRange(rand, config.SALE_LISTING_FRACTION);
-  const count = Math.min(shuffled.length, Math.max(1, Math.round(shuffled.length * fraction)));
-  const chosen = shuffled.slice(0, count);
+  const count = Math.min(weighted.length, Math.max(1, Math.round(weighted.length * fraction)));
+  const chosen = weighted.slice(0, count);
 
   const discounts: Record<string, number> = {};
   for (const listing of chosen) {
@@ -380,28 +409,20 @@ function tick(state: RunState, action: Extract<GameAction, { type: 'TICK' }>, co
     next = startSale(next, now, rand, config);
   }
 
-  // --- Steps 6 + 7: release roll, then victory check. -----------------------
+  // --- Steps 6 + 7: release roll, then priced-out check. --------------------
   //
-  // `hasWon` is evaluated on `next` BEFORE the release step runs. A release
-  // only ever grows the available-games denominator, so by itself it can
-  // never create a win. But if the player already owned everything entering
-  // this step, a release must not be allowed to land in the same tick —
-  // per spec Edge Cases: "A new game releases at the same moment the player
-  // owns everything: the victory check resolves first, so the player is not
-  // robbed of a win by a race." So: if already won, skip the release
-  // entirely and resolve the win; otherwise roll the release normally and
-  // check for a win afterward (which a release cannot itself trigger, but
-  // this keeps steps 6/7 in the order the contract specifies).
-  const alreadyWon = hasWon(next);
-  if (alreadyWon) {
-    next = { ...next, status: 'won', activeShift: null, endedAt: now };
-  } else {
-    if (now >= next.nextReleaseAt) {
-      next = rollRelease(next, now, rand, config);
-    }
-    if (hasWon(next)) {
-      next = { ...next, status: 'won', activeShift: null, endedAt: now };
-    }
+  // Release runs FIRST, then isPricedOut is evaluated on the result. Unlike
+  // the old victory check, a release here can genuinely save the player: it
+  // grows the unowned set, which can only lower cheapestUnownedPrice, so
+  // rolling it before the check gives a same-tick release its full chance
+  // to pull the player back from the brink rather than being robbed of a
+  // lifeline by ordering. Death-by-drain (step 2) still takes precedence
+  // over this and still pays no wage.
+  if (now >= next.nextReleaseAt) {
+    next = rollRelease(next, now, rand, config);
+  }
+  if (isPricedOut(next, now - next.startedAt, config)) {
+    next = { ...next, status: 'pricedOut', activeShift: null, endedAt: now };
   }
 
   return next;

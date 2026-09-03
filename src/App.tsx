@@ -7,7 +7,7 @@ import { shiftProgress, currentDrainRatePerMs } from './lib/timeEngine'
 import {
   availableListings, canAfford, currentPrice, discountFor,
   gameById, isOwned, listingsForStorefront, restingShiftCost, spacedShiftCost,
-  canSurviveRestingShift, totalHoursSpent, runStats, storefrontById,
+  canSurviveRestingShift, totalHoursSpent, runStats, storefrontById, collectionProgress,
 } from './lib/economy'
 import { collectionScore, scoreForValue } from './lib/valuation'
 import { STOREFRONTS } from './data/catalogue'
@@ -40,22 +40,31 @@ export default function App() {
   )
   const [view, setView] = useState<View>('store')
   const lastTick = useRef(Date.now())
+  // Mirrors wall-clock time at TICK_MS granularity. Prices inflate
+  // continuously with elapsed time (lib/inflation.ts) even on ticks where
+  // the reducer's derived state doesn't otherwise change (no shift, no
+  // sale/release event) — the reducer bails out to the same object
+  // reference on those ticks, which would leave `now` (and therefore every
+  // displayed price) stale until the next state-changing event. Tracking
+  // `now` in its own state guarantees a render, and therefore a fresh price
+  // recompute, every tick regardless.
+  const [now, setNow] = useState(() => Date.now())
 
   // Single interval drives every time-based behaviour. It never accumulates
   // state itself — it just asks the pure reducer what is true now.
   useEffect(() => {
     const id = setInterval(() => {
-      const now = Date.now()
-      const dt = now - lastTick.current
-      lastTick.current = now
-      dispatch({ type: 'TICK', now, dt, rand: Math.random })
+      const n = Date.now()
+      const dt = n - lastTick.current
+      lastTick.current = n
+      setNow(n)
+      dispatch({ type: 'TICK', now: n, dt, rand: Math.random })
     }, CONFIG.TICK_MS)
     return () => clearInterval(id)
   }, [])
 
   useEffect(() => { saveRun(state) }, [state])
 
-  const now = Date.now()
   const shift = state.activeShift
   const progress = shift ? shiftProgress(shift, now, CONFIG) : null
   const drainPerSecond = shift ? currentDrainRatePerMs(shift, CONFIG) * 1000 : 0
@@ -70,6 +79,7 @@ export default function App() {
     }
   }, [view, state.activeShift?.spacingOut])
 
+  const elapsedMs = now - state.startedAt
   const storeListings: StoreListingVM[] = useMemo(() => {
     const avail = new Set(availableListings(state).map(l => l.id))
     return listingsForStorefront(state, state.activeStorefrontId)
@@ -77,7 +87,7 @@ export default function App() {
       .flatMap(listing => {
         const game = gameById(listing.gameId)
         if (!game) return []
-        const price = currentPrice(listing, state.activeSale, CONFIG)
+        const price = currentPrice(listing, state.activeSale, elapsedMs, CONFIG)
         return [{
           game, listing, price, listPrice: listing.price,
           discountPercent: discountFor(listing, state.activeSale),
@@ -86,7 +96,7 @@ export default function App() {
           displayedReviews: state.displayedReviews[game.id] ?? [],
         }]
       })
-  }, [state])
+  }, [state, elapsedMs])
 
   const ownedGames: LibraryGameVM[] = useMemo(
     () => state.ownedGameIds.flatMap(id => {
@@ -108,6 +118,10 @@ export default function App() {
   )
 
   const stats = runStats(state, now)
+  // The end screen reads differently depending on WHY the run ended: broke
+  // (the ordinary priced-out case) vs. nothing left to buy at all.
+  const progressCounts = collectionProgress(state)
+  const catalogueExhausted = progressCounts.available > 0 && progressCounts.owned === progressCounts.available
 
   // Welcome and EndScreen are mutually exclusive full-screen overlays (see
   // their own gates below). Whenever either is open, everything else on the
@@ -190,6 +204,7 @@ export default function App() {
       {state.status !== 'playing' && (
         <EndScreen
           status={state.status}
+          catalogueExhausted={catalogueExhausted}
           gamesOwned={stats.gamesOwned}
           hoursSpent={stats.hoursSpent}
           shiftsWorked={stats.shiftsWorked}

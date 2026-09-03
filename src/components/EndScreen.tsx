@@ -1,7 +1,12 @@
 import { useEffect, useRef } from 'react';
 import { hoursWhole } from '../lib/format';
 export function EndScreen(props: {
-  status: 'dead' | 'won';
+  status: 'dead' | 'pricedOut';
+  /** True when the run ended because there was nothing left to buy at all,
+   *  rather than because the player simply ran out of purchasing power —
+   *  the end screen reads differently for the two cases. Meaningless when
+   *  status is 'dead'. */
+  catalogueExhausted: boolean;
   gamesOwned: number;
   hoursSpent: number;
   shiftsWorked: number;
@@ -23,7 +28,11 @@ export function EndScreen(props: {
       <div className="text-center max-w-2xl px-6">
         {/* Heading */}
         <h1 className="text-5xl font-black text-slate-100 mb-8 tracking-tight">
-          {isDead ? 'Your time is up.' : 'You own everything.'}
+          {isDead
+            ? 'Your time is up.'
+            : props.catalogueExhausted
+              ? 'You own everything there is.'
+              : 'You just got priced out.'}
         </h1>
 
         {/* Subheading / punchline */}
@@ -35,11 +44,17 @@ export function EndScreen(props: {
               <br />
               You played none of them.
             </>
+          ) : props.catalogueExhausted ? (
+            <>
+              Every last listing, yours. Nothing left to buy — for once, the market
+              <br />
+              didn&apos;t beat you to it. It&apos;ll keep climbing anyway.
+            </>
           ) : (
             <>
-              There is nothing left to buy.
+              You didn&apos;t die. You simply can&apos;t afford anything anymore.
               <br />
-              New releases were coming anyway.
+              The market moved on without you.
             </>
           )}
         </p>

@@ -7,6 +7,7 @@
 
 import { GAMES, LISTINGS, STOREFRONTS } from '../data/catalogue';
 import { restingShiftDrain, spacedShiftDrain, type Config } from './config';
+import { inflatedPrice } from './inflation';
 import type { Game, Listing, RunState, Sale, Storefront } from './types';
 
 // ---------------------------------------------------------------------------
@@ -35,14 +36,30 @@ export function discountFor(listing: Listing, sale: Sale | null): number {
 }
 
 /**
- * Effective price for a listing under the active sale.
- * Rounded to a whole number and clamped to `config.MIN_PRICE` — a price must
- * never be zero or negative, even after a steep discount.
+ * Effective price for a listing at `elapsedMs` (ms since the run started)
+ * under the active sale.
+ *
+ * MUST compose in this order: base listing price -> inflation -> sale
+ * discount -> MIN_PRICE floor. Inflation applies to the base price and the
+ * discount applies to the ALREADY-INFLATED price, so a percentage off is
+ * worth more later in the run in absolute terms — sales stay genuinely
+ * attractive as the run goes on rather than eroding in value. Every price
+ * path in the app goes through this one function; there must be no second
+ * path that charges an un-inflated price.
  */
-export function currentPrice(listing: Listing, sale: Sale | null, config: Config): number {
+export function currentPrice(
+  listing: Listing,
+  sale: Sale | null,
+  elapsedMs: number,
+  config: Config,
+): number {
+  const storefront = storefrontById(listing.storefrontId);
+  const inflated = inflatedPrice(listing.price, elapsedMs, storefront?.inflationRate ?? 1, config);
+
   const percent = discountFor(listing, sale);
-  if (percent <= 0) return listing.price;
-  const discounted = Math.round(listing.price * (1 - percent / 100));
+  if (percent <= 0) return inflated;
+
+  const discounted = Math.round(inflated * (1 - percent / 100));
   return Math.max(config.MIN_PRICE, discounted);
 }
 
@@ -83,6 +100,12 @@ export function listingsForStorefront(state: RunState, storefrontId: string): Li
   return availableListings(state).filter((l) => l.storefrontId === storefrontId);
 }
 
+/**
+ * Owned vs. available counts. Used to detect a fully-exhausted catalogue —
+ * `owned === available && available > 0` — which is one of the two ways a
+ * run ends in being priced out (see isPricedOut / the EndScreen's distinct
+ * "nothing left to buy" copy).
+ */
 export function collectionProgress(state: RunState): { owned: number; available: number } {
   const available = availableGameIds(state);
   const owned = available.filter((id) => isOwned(state, id)).length;
@@ -90,12 +113,50 @@ export function collectionProgress(state: RunState): { owned: number; available:
 }
 
 /**
- * Won when every available game is owned. Guarded against `available === 0`
- * so an edge case (e.g. an empty catalogue) can never declare a spurious win.
+ * Cheapest inflated price, at `elapsedMs`, across every currently-available
+ * UNOWNED listing — the number that decides whether the player has anything
+ * left they could still work toward. Ignores any active sale: sales are
+ * transient and this is used to reason about prices at a FUTURE point in
+ * time (see isPricedOut), where no sale can be assumed. Returns null when
+ * there is no unowned listing left at all (the catalogue is exhausted).
  */
-export function hasWon(state: RunState): boolean {
-  const { owned, available } = collectionProgress(state);
-  return available > 0 && owned === available;
+export function cheapestUnownedPrice(
+  state: RunState,
+  elapsedMs: number,
+  config: Config,
+): number | null {
+  const unowned = availableListings(state).filter((l) => !isOwned(state, l.gameId));
+  if (unowned.length === 0) return null;
+
+  let min = Infinity;
+  for (const listing of unowned) {
+    const storefront = storefrontById(listing.storefrontId);
+    const price = inflatedPrice(listing.price, elapsedMs, storefront?.inflationRate ?? 1, config);
+    if (price < min) min = price;
+  }
+  return min;
+}
+
+/**
+ * The run is over not merely because the player is broke right now — they
+ * can still work — but when even ONE MORE full shift would not be enough.
+ * Concretely: hoursRemaining plus the net of one more resting shift (wage
+ * minus its drain) is compared against the cheapest unowned price as it
+ * will be once that shift finishes (elapsedMs + WORK_REQUIRED_MS). If that
+ * projected balance still falls short, the player is priced out. A fully
+ * exhausted catalogue (cheapestUnownedPrice === null — nothing left to buy,
+ * ever) also ends the run.
+ */
+export function isPricedOut(state: RunState, elapsedMs: number, config: Config): boolean {
+  const priceAfterOneMoreShift = cheapestUnownedPrice(
+    state,
+    elapsedMs + config.WORK_REQUIRED_MS,
+    config,
+  );
+  if (priceAfterOneMoreShift === null) return true;
+
+  const projectedHours = state.hoursRemaining + (config.WAGE - restingShiftDrain(config));
+  return projectedHours < priceAfterOneMoreShift;
 }
 
 // ---------------------------------------------------------------------------

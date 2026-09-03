@@ -11,6 +11,8 @@ export const STOREFRONTS: Storefront[] = [
       fg: '#e8e8e8',
       accent: '#00d4ff',
     },
+    // Premium store, inflates fastest — the better catalogue is running away from you.
+    inflationRate: 1.3,
   },
   {
     id: 'dazzle',
@@ -22,6 +24,7 @@ export const STOREFRONTS: Storefront[] = [
       fg: '#2d1b4e',
       accent: '#ff6b9d',
     },
+    inflationRate: 1.0,
   },
   {
     id: 'flatshelf',
@@ -33,6 +36,8 @@ export const STOREFRONTS: Storefront[] = [
       fg: '#1a1a1a',
       accent: '#666666',
     },
+    // Bargain bin stays cheap — mostly junk, but junk is where mispriced gems hide.
+    inflationRate: 0.7,
   },
 ]
 

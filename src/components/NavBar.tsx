@@ -5,7 +5,7 @@ export function NavBar(props: {
   onChange: (view: View) => void;
   onRestart: () => void;
   shiftActive: boolean;
-  status: 'playing' | 'dead' | 'won';
+  status: 'playing' | 'dead' | 'pricedOut';
 }) {
   const views: Array<{ id: View; label: string }> = [
     { id: 'store', label: 'Store' },

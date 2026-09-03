@@ -58,6 +58,14 @@ export type Storefront = {
     fg: string;
     accent: string;
   };
+  /**
+   * Scales the exponent of this store's inflation (inflation.ts
+   * inflationMultiplier): 1.0 doubles prices exactly every
+   * config.INFLATION_DOUBLING_MS; > 1 compounds faster, < 1 slower. The
+   * strategic axis of the run — cream has the better catalogue but is
+   * running away from you; flat shelf is mostly junk but stays affordable.
+   */
+  inflationRate: number;
 };
 
 export type Listing = {
@@ -158,7 +166,7 @@ export type Announcement = {
 // RunState
 // ---------------------------------------------------------------------------
 
-export type RunStatus = 'playing' | 'dead' | 'won';
+export type RunStatus = 'playing' | 'dead' | 'pricedOut';
 
 export type RunState = {
   /** Mismatch on load => discard save, fresh run. */
