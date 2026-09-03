@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest'
 import {
   SCORE_CURVE, scoreForValue, rollTrueValue, rollAllTrueValues, collectionScore, selectReviews,
   pickReappraisalTarget, applyReappraisal, earlyAdopterBonus,
+  franchiseBonus, franchiseBonusForSize, totalEarlyAdopterBonus,
+  scoreBreakdown, regretList, worstHold,
 } from './valuation'
-import { EARLY_ADOPTER_MULTIPLIER } from './config'
-import type { Game, Review } from './types'
+import { EARLY_ADOPTER_MULTIPLIER, FRANCHISE_BONUS_COEFFICIENT } from './config'
+import type { Game, ReappraisalHistoryEntry, Review } from './types'
 
 // Tiny deterministic PRNG (mulberry32) so statistical tests are reproducible and don't rely on
 // Math.random — the whole point of injecting `rand` is that the caller controls the sequence.
@@ -337,5 +339,141 @@ describe('collectionScore with early-adopter bonuses', () => {
   it('defaults to no bonus when the argument is omitted, matching pre-Task-5 behaviour', () => {
     const trueValues = { a: 4, b: 2 }
     expect(collectionScore(['a', 'b'], trueValues)).toBe(scoreForValue(4) + scoreForValue(2))
+  })
+})
+
+describe('franchiseBonus', () => {
+  it('pays the bonus for a fully-owned series and nothing for a series missing one game', () => {
+    const a = makeGame({ id: 'a', series: 'trilogy' })
+    const b = makeGame({ id: 'b', series: 'trilogy' })
+    const c = makeGame({ id: 'c', series: 'trilogy' })
+    const games = [a, b, c]
+
+    expect(franchiseBonus(['a', 'b'], games)).toEqual([])
+
+    const complete = franchiseBonus(['a', 'b', 'c'], games)
+    expect(complete).toEqual([{ series: 'trilogy', size: 3, bonus: franchiseBonusForSize(3) }])
+    expect(complete[0].bonus).toBeGreaterThan(0)
+  })
+
+  it('scales the bonus with series size in the intended direction: a larger set pays more than proportionally more than a pair', () => {
+    const pairBonus = franchiseBonusForSize(2)
+    const quadBonus = franchiseBonusForSize(4)
+    expect(quadBonus).toBeGreaterThan(pairBonus)
+    // Twice the members should be worth more than simply double the pair's bonus.
+    expect(quadBonus).toBeGreaterThan(pairBonus * 2)
+  })
+
+  it('never contributes a bonus for a game with no series field', () => {
+    const untagged = makeGame({ id: 'solo' })
+    expect(franchiseBonus(['solo'], [untagged])).toEqual([])
+  })
+
+  it('still pays a (smaller) bonus for a single-game series, since owning it does complete that series', () => {
+    const solo = makeGame({ id: 'solo-series', series: 'solo' })
+    const result = franchiseBonus(['solo-series'], [solo])
+    expect(result).toEqual([{ series: 'solo', size: 1, bonus: FRANCHISE_BONUS_COEFFICIENT }])
+  })
+})
+
+describe('scoreBreakdown', () => {
+  it('sums collection + earlyAdopter + franchise to the reported total', () => {
+    const a = makeGame({ id: 'a', series: 'duo' })
+    const b = makeGame({ id: 'b', series: 'duo' })
+    const c = makeGame({ id: 'c' })
+    const games = [a, b, c]
+    const trueValues = { a: 4, b: 2, c: 5 }
+    const earlyAdopterBonuses = { a: 12, c: 0 }
+    const ownedGameIds = ['a', 'b', 'c']
+
+    const result = scoreBreakdown(ownedGameIds, trueValues, earlyAdopterBonuses, games)
+
+    expect(result.collection).toBe(scoreForValue(4) + scoreForValue(2) + scoreForValue(5))
+    expect(result.earlyAdopter).toBe(totalEarlyAdopterBonus(earlyAdopterBonuses))
+    expect(result.earlyAdopter).toBe(12)
+    expect(result.franchise).toBe(franchiseBonusForSize(2))
+    expect(result.total).toBe(result.collection + result.earlyAdopter + result.franchise)
+  })
+})
+
+function makeHistoryEntry(overrides: Partial<ReappraisalHistoryEntry>): ReappraisalHistoryEntry {
+  return {
+    gameId: 'g',
+    direction: 'up',
+    oldTrueValue: 3,
+    newTrueValue: 4,
+    oldMarketRating: 3,
+    newMarketRating: 4,
+    owned: false,
+    at: 1000,
+    ...overrides,
+  }
+}
+
+describe('regretList', () => {
+  it('returns exactly the upward-re-appraised games the player did not own, excluding owned ones', () => {
+    const history: ReappraisalHistoryEntry[] = [
+      makeHistoryEntry({ gameId: 'missed-it', direction: 'up', owned: false, at: 1000 }),
+      makeHistoryEntry({ gameId: 'owned-it', direction: 'up', owned: true, at: 2000 }),
+      makeHistoryEntry({ gameId: 'dodged-it', direction: 'down', owned: false, at: 3000 }),
+      makeHistoryEntry({ gameId: 'held-it-down', direction: 'down', owned: true, at: 4000 }),
+    ]
+
+    const result = regretList(history)
+    expect(result).toHaveLength(1)
+    expect(result[0].gameId).toBe('missed-it')
+  })
+
+  it('folds multiple qualifying events for the same unowned game into one row spanning the full swing', () => {
+    const history: ReappraisalHistoryEntry[] = [
+      makeHistoryEntry({
+        gameId: 'double-move', owned: false, direction: 'up',
+        oldTrueValue: 2, newTrueValue: 3, oldMarketRating: 2, newMarketRating: 3, at: 1000,
+      }),
+      makeHistoryEntry({
+        gameId: 'double-move', owned: false, direction: 'up',
+        oldTrueValue: 3, newTrueValue: 4, oldMarketRating: 3, newMarketRating: 4, at: 2000,
+      }),
+    ]
+
+    const result = regretList(history)
+    expect(result).toEqual([
+      { gameId: 'double-move', oldTrueValue: 2, newTrueValue: 4, oldMarketRating: 2, newMarketRating: 4 },
+    ])
+  })
+
+  it('excludes any event where the player already owned the game at the time it fired', () => {
+    const history: ReappraisalHistoryEntry[] = [
+      makeHistoryEntry({ gameId: 'bought-later', owned: false, direction: 'up', at: 1000 }),
+      makeHistoryEntry({ gameId: 'bought-later', owned: true, direction: 'up', at: 5000 }),
+    ]
+    const result = regretList(history)
+    expect(result).toHaveLength(1)
+    expect(result[0].gameId).toBe('bought-later')
+  })
+
+  it('returns an empty list when nothing qualifies', () => {
+    expect(regretList([])).toEqual([])
+  })
+})
+
+describe('worstHold', () => {
+  it('picks the owned game re-appraised down to the lowest true value, ignoring up-moves and unowned dips', () => {
+    const history: ReappraisalHistoryEntry[] = [
+      makeHistoryEntry({
+        gameId: 'mild-dip', direction: 'down', owned: true, oldTrueValue: 4, newTrueValue: 3, at: 1000,
+      }),
+      makeHistoryEntry({
+        gameId: 'bad-hold', direction: 'down', owned: true, oldTrueValue: 2, newTrueValue: 1, at: 2000,
+      }),
+      makeHistoryEntry({ gameId: 'ignored-up', direction: 'up', owned: true, at: 3000 }),
+      makeHistoryEntry({ gameId: 'ignored-unowned', direction: 'down', owned: false, at: 4000 }),
+    ]
+    const result = worstHold(history)
+    expect(result?.gameId).toBe('bad-hold')
+  })
+
+  it('returns null when nothing qualifies', () => {
+    expect(worstHold([])).toBeNull()
   })
 })

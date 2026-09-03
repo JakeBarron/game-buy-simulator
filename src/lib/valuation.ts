@@ -8,7 +8,10 @@
 // PURITY: no React, no Date.now(), no Math.random(), no storage. Randomness always arrives as
 // an injected `rand: () => number` so a run's rolls are reproducible and testable.
 
-import type { Game, GameTrait, Review, ReviewSentiment, RunState } from './types';
+import type {
+  Game, GameTrait, ReappraisalHistoryEntry, Review, ReviewSentiment, RunState,
+} from './types';
+import { FRANCHISE_BONUS_COEFFICIENT } from './config';
 
 // ---------------------------------------------------------------------------
 // Scoring curve
@@ -379,4 +382,163 @@ export function earlyAdopterBonus(
   const gain = scoreForValue(newTrueValue) - scoreForValue(oldTrueValue);
   if (gain <= 0) return 0;
   return gain * (multiplier - 1);
+}
+
+// ---------------------------------------------------------------------------
+// Franchise bonuses (Task 6): completionism as a trap.
+// ---------------------------------------------------------------------------
+//
+// Owning every game tagged with the same `series` id (catalogue.ts, Task 2) pays a bonus on top
+// of the curve value each member already earns individually. Partial sets pay nothing — the
+// incentive is to finish what you started, mediocre entries included, which is exactly the
+// storefront psychology this mechanic satirises. Do not "fix" that by making set members better,
+// or by warning the player away from a set they can't complete.
+
+export type FranchiseBonusEntry = { series: string; size: number; bonus: number };
+
+/**
+ * Bonus for a fully-owned series of `size` games. Triangular growth
+ * (`coefficient * size * (size + 1) / 2`: 1, 3, 6, 10, 15 x coefficient for sizes 1-5) rather
+ * than flat-linear, so a larger set pays meaningfully more than proportionally more — a
+ * four-game set is worth 10x coefficient, not just 4x, more than double a pair's 3x. A
+ * single-game "series" (several catalogue titles are the only released entry in their
+ * in-fiction franchise) still pays 1x coefficient — completing it only ever required the one
+ * purchase, and that's the joke, not a bug.
+ */
+export function franchiseBonusForSize(size: number): number {
+  return FRANCHISE_BONUS_COEFFICIENT * ((size * (size + 1)) / 2);
+}
+
+/**
+ * Every fully-owned series among `games`, with its size and bonus. A series missing even one
+ * member pays nothing — partial completion earns nothing extra, only each owned member's own
+ * curve value. A game with no `series` never contributes. Order follows first appearance of
+ * each series in `games`.
+ */
+export function franchiseBonus(ownedGameIds: string[], games: Game[]): FranchiseBonusEntry[] {
+  const owned = new Set(ownedGameIds);
+  const membersBySeries = new Map<string, Game[]>();
+  for (const game of games) {
+    if (!game.series) continue;
+    const members = membersBySeries.get(game.series);
+    if (members) members.push(game);
+    else membersBySeries.set(game.series, [game]);
+  }
+
+  const result: FranchiseBonusEntry[] = [];
+  for (const [series, members] of membersBySeries) {
+    if (!members.every((g) => owned.has(g.id))) continue;
+    result.push({ series, size: members.length, bonus: franchiseBonusForSize(members.length) });
+  }
+  return result;
+}
+
+/** Sum of every fully-owned series' bonus. 0 when `entries` is empty. */
+export function totalFranchiseBonus(entries: FranchiseBonusEntry[]): number {
+  return entries.reduce((sum, entry) => sum + entry.bonus, 0);
+}
+
+/** Sum of every game's banked early-adopter bonus (RunState.earlyAdopterBonuses). 0 for an
+ *  empty record. */
+export function totalEarlyAdopterBonus(earlyAdopterBonuses: Record<string, number>): number {
+  return Object.values(earlyAdopterBonuses).reduce((sum, bonus) => sum + bonus, 0);
+}
+
+/**
+ * The three scoring components, kept separately computable, plus their sum — this is what the
+ * end screen's breakdown reads directly, so `collection + earlyAdopter + franchise === total`
+ * by construction. `collection` here is curve values ONLY: the early-adopter bonus is its own
+ * line on the end screen, unlike the in-run header's `collectionScore` call (which folds
+ * early-adopter bonuses into "collection score" for a single running number during play).
+ */
+export function scoreBreakdown(
+  ownedGameIds: string[],
+  trueValues: Record<string, number>,
+  earlyAdopterBonuses: Record<string, number>,
+  games: Game[],
+): {
+  collection: number;
+  earlyAdopter: number;
+  franchise: number;
+  total: number;
+  franchiseBonuses: FranchiseBonusEntry[];
+} {
+  const collection = collectionScore(ownedGameIds, trueValues);
+  const earlyAdopter = totalEarlyAdopterBonus(earlyAdopterBonuses);
+  const franchiseBonuses = franchiseBonus(ownedGameIds, games);
+  const franchise = totalFranchiseBonus(franchiseBonuses);
+  return {
+    collection,
+    earlyAdopter,
+    franchise,
+    total: collection + earlyAdopter + franchise,
+    franchiseBonuses,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Regret list (Task 6): the replay engine.
+// ---------------------------------------------------------------------------
+//
+// Derived strictly from `reappraisalHistory` (Task 5) — never reconstructed from current
+// ownership or current trueValues/marketRatingOverrides. `entry.owned` records whether the
+// player owned the game AT THE MOMENT that event fired, which is exactly the question "did they
+// pass on this" needs answered — not whether they happen to own it now (they might have bought
+// it afterward; that doesn't erase that they passed on it while it was still cheap and unproven).
+
+export type RegretEntry = {
+  gameId: string;
+  oldMarketRating: number;
+  newMarketRating: number;
+  oldTrueValue: number;
+  newTrueValue: number;
+};
+
+/**
+ * Games the player did NOT own at the moment they were re-appraised UP, folded to one row per
+ * game: the earliest `old*` seen and the latest `new*` seen among that game's qualifying events,
+ * so a game re-appraised upward more than once while still unowned shows its full swing rather
+ * than one row per event. Owned-at-the-time events are excluded entirely. `history` is
+ * chronological (append-only), so a straight left-to-right fold is sufficient — no sorting or
+ * re-derivation of state required.
+ */
+export function regretList(history: ReappraisalHistoryEntry[]): RegretEntry[] {
+  const byGame = new Map<string, RegretEntry>();
+  for (const entry of history) {
+    if (entry.direction !== 'up' || entry.owned) continue;
+    const existing = byGame.get(entry.gameId);
+    if (!existing) {
+      byGame.set(entry.gameId, {
+        gameId: entry.gameId,
+        oldMarketRating: entry.oldMarketRating,
+        newMarketRating: entry.newMarketRating,
+        oldTrueValue: entry.oldTrueValue,
+        newTrueValue: entry.newTrueValue,
+      });
+    } else {
+      existing.newMarketRating = entry.newMarketRating;
+      existing.newTrueValue = entry.newTrueValue;
+    }
+  }
+  return Array.from(byGame.values());
+}
+
+/**
+ * The single worst hold: the owned-at-the-time game with the lowest true value reached by a
+ * downward re-appraisal, ties broken by most recent. Null when nothing qualifies — not every
+ * run has one, and the end screen only shows it when it exists.
+ */
+export function worstHold(history: ReappraisalHistoryEntry[]): ReappraisalHistoryEntry | null {
+  let worst: ReappraisalHistoryEntry | null = null;
+  for (const entry of history) {
+    if (entry.direction !== 'down' || !entry.owned) continue;
+    if (
+      !worst ||
+      entry.newTrueValue < worst.newTrueValue ||
+      (entry.newTrueValue === worst.newTrueValue && entry.at > worst.at)
+    ) {
+      worst = entry;
+    }
+  }
+  return worst;
 }

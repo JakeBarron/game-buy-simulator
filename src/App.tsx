@@ -10,8 +10,8 @@ import {
   canSurviveRestingShift, totalHoursSpent, runStats, storefrontById, collectionProgress,
   effectiveMarketRating,
 } from './lib/economy'
-import { collectionScore, scoreForValue } from './lib/valuation'
-import { STOREFRONTS } from './data/catalogue'
+import { collectionScore, scoreForValue, scoreBreakdown, regretList, worstHold } from './lib/valuation'
+import { GAMES, STOREFRONTS } from './data/catalogue'
 import { HoursHeader } from './components/HoursHeader'
 import { NavBar, type View } from './components/NavBar'
 import { StoreView, type StoreListingVM } from './components/StoreView'
@@ -145,6 +145,34 @@ export default function App() {
   const progressCounts = collectionProgress(state)
   const catalogueExhausted = progressCounts.available > 0 && progressCounts.owned === progressCounts.available
 
+  // Task 6: the end screen's score breakdown and regret list. Cheap to compute on every
+  // render (small arrays, pure functions) so there's no need to gate these behind
+  // `endScreenVisible` below.
+  const endScreenScoreBreakdown = useMemo(
+    () => scoreBreakdown(state.ownedGameIds, state.trueValues, state.earlyAdopterBonuses, GAMES),
+    [state.ownedGameIds, state.trueValues, state.earlyAdopterBonuses],
+  )
+  const toRegretItemVM = (entry: { gameId: string; oldMarketRating: number; newMarketRating: number; oldTrueValue: number; newTrueValue: number }) => {
+    const game = gameById(entry.gameId)
+    return {
+      gameId: entry.gameId,
+      title: game?.title ?? entry.gameId,
+      basePrice: game?.basePrice ?? 0,
+      oldMarketRating: entry.oldMarketRating,
+      newMarketRating: entry.newMarketRating,
+      oldTrueValue: entry.oldTrueValue,
+      newTrueValue: entry.newTrueValue,
+    }
+  }
+  const endScreenRegretItems = useMemo(
+    () => regretList(state.reappraisalHistory).map(toRegretItemVM),
+    [state.reappraisalHistory],
+  )
+  const endScreenWorstHold = useMemo(() => {
+    const entry = worstHold(state.reappraisalHistory)
+    return entry ? toRegretItemVM(entry) : null
+  }, [state.reappraisalHistory])
+
   // Welcome and EndScreen are mutually exclusive full-screen overlays (see
   // their own gates below). Whenever either is open, everything else on the
   // page is background content: it must not be focusable or clickable, so
@@ -231,6 +259,9 @@ export default function App() {
           hoursSpent={stats.hoursSpent}
           shiftsWorked={stats.shiftsWorked}
           hoursDrained={stats.hoursDrained}
+          scoreBreakdown={endScreenScoreBreakdown}
+          regretItems={endScreenRegretItems}
+          worstHold={endScreenWorstHold}
           onRestart={() => dispatch({ type: 'RESTART', now: Date.now(), rand: Math.random })}
         />
       )}
