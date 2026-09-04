@@ -1,3 +1,21 @@
+> **Superseded by the speculation loop (branch `002-speculation-loop`).** This document is the
+> record of what spec 001 specified at the end of the POC; it is not current. In particular:
+> - There is no `won` status and no victory/completion check. `RunStatus` is now
+>   `'playing' | 'dead' | 'pricedOut'` — a run ends when the player can no longer afford anything
+>   available, even after one more shift (`economy.isPricedOut`), not by owning everything.
+> - `BUY`, `START_SHIFT`, and `TICK` no longer take a bare `now`/`config` only — `TICK` also
+>   carries `dt` and a `rand` (see `src/lib/types.ts` `GameAction`), and pricing now composes
+>   inflation and sale discount (`economy.currentPrice`), not a static listing price.
+> - The `TICK` resolution order below is missing three steps added later: a re-appraisal roll
+>   (the crowd changes its mind about a game mid-run — Task 5), the priced-out check that replaced
+>   step 7's victory check, and franchise-bonus/regret-list derivation on the end screen (Task 6).
+> - `hasWon`/`won` copy in the View contract is retired; there's a priced-out ending and a regret
+>   screen instead.
+>
+> `src/lib/gameReducer.ts` and `src/lib/types.ts` are the current source of truth for the action
+> surface and resolution order. This file is kept as a historical record of spec 001, not updated
+> to track later tasks.
+
 # UI & Reducer Contract: Game Buy Simulator
 
 This app exposes no network API. Its only contracts are the reducer's action surface (the boundary
