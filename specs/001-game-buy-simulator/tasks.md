@@ -199,6 +199,12 @@ Single static SPA at the repository root: `src/`, `index.html`, `package.json`. 
 
 ---
 
+## Phase 12: Post-POC Verification Debt
+
+- [ ] T060 Verify the death end screen actually renders when a run reaches `status: 'dead'`, and investigate the unexplained run-restart observed after a death during live testing. Trace `src/App.tsx` (EndScreen render condition), `src/components/EndScreen.tsx`, and the death path in `src/lib/gameReducer.ts`. Fix in place if a defect is found (constitution v2.0.0, Principle IV).
+
+---
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies
