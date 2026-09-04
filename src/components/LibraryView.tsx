@@ -1,9 +1,18 @@
 import type { Game } from '../lib/types';
 import { Thumbnail } from './Thumbnail';
+import { Stars } from './Stars';
 import { hours } from '../lib/format';
 
+export type LibraryGameVM = {
+  game: Game;
+  /** Hidden true value, revealed now that the game is owned. */
+  trueValue: number;
+  /** Points this game contributes to the collection score (scoreForValue(trueValue)). */
+  points: number;
+};
+
 export function LibraryView(props: {
-  games: Game[];
+  games: LibraryGameVM[];
   totalHoursSpent: number;
 }) {
   const { games, totalHoursSpent } = props;
@@ -38,12 +47,19 @@ export function LibraryView(props: {
         </div>
       ) : (
         <div className="grid gap-6 grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-          {games.map((game) => (
-            <div key={game.id} className="flex flex-col gap-3">
+          {games.map(({ game, trueValue, points }) => (
+            <div key={game.id} className="flex flex-col gap-2">
               <Thumbnail gameId={game.id} size={128} />
               <h2 className="text-sm font-medium text-gray-200 leading-tight line-clamp-2">
                 {game.title}
               </h2>
+              <div
+                className="flex items-center justify-between gap-2 text-xs"
+                aria-label={`True value ${trueValue} out of 5 stars, worth ${points} points`}
+              >
+                <Stars rating={trueValue} />
+                <span className="font-mono font-semibold text-amber-400">+{points}</span>
+              </div>
             </div>
           ))}
         </div>

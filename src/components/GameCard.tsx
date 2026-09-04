@@ -1,7 +1,16 @@
 import { useEffect, useState } from 'react';
-import type { Game, Listing } from '../lib/types';
+import type { Game, Listing, Review, ReviewSentiment } from '../lib/types';
 import { Thumbnail } from './Thumbnail';
+import { Stars } from './Stars';
 import { hours } from '../lib/format';
+
+const SENTIMENT_LABEL: Record<ReviewSentiment, string> = {
+  glowing: 'Glowing',
+  positive: 'Positive',
+  mixed: 'Mixed',
+  negative: 'Negative',
+  damning: 'Damning',
+};
 
 export function GameCard(props: {
   game: Game;
@@ -11,11 +20,15 @@ export function GameCard(props: {
   discountPercent: number;
   owned: boolean;
   affordable: boolean;
+  /** This run's per-run review selection (valuation.selectReviews) — NOT the raw pool, and
+   *  NOT a hint at the hidden true value; true value itself is never shown here. */
+  displayedReviews: Review[];
   onBuy: () => void;
 }) {
-  const { game, price, listPrice, discountPercent, owned, affordable, onBuy } = props;
+  const { game, price, listPrice, discountPercent, owned, affordable, displayedReviews, onBuy } = props;
 
   const [justBought, setJustBought] = useState(false);
+  const [reviewsOpen, setReviewsOpen] = useState(false);
 
   useEffect(() => {
     if (!justBought) return;
@@ -24,6 +37,7 @@ export function GameCard(props: {
   }, [justBought]);
 
   const onSale = discountPercent > 0;
+  const reviewsPanelId = `${game.id}-reviews`;
 
   function handleBuy() {
     onBuy();
@@ -46,6 +60,41 @@ export function GameCard(props: {
         <h3 className="truncate text-sm font-semibold text-neutral-100">{game.title}</h3>
 
         <p className="line-clamp-2 text-xs text-neutral-400">{game.blurb}</p>
+
+        <div
+          className="flex items-center gap-1.5 text-xs"
+          aria-label={`Rated ${game.marketRating} out of 5 stars, ${game.reviewCount.toLocaleString()} reviews`}
+        >
+          <Stars rating={game.marketRating} />
+          <span className="text-neutral-500">({game.reviewCount.toLocaleString()})</span>
+        </div>
+
+        <button
+          type="button"
+          aria-expanded={reviewsOpen}
+          aria-controls={reviewsPanelId}
+          aria-label={`${reviewsOpen ? 'Hide' : 'Show'} reviews for ${game.title}`}
+          onClick={() => setReviewsOpen((open) => !open)}
+          className="-ml-3 -mt-1 self-start rounded px-3 py-1.5 text-xs font-medium text-neutral-400 underline-offset-2 hover:text-neutral-200 hover:underline"
+        >
+          {reviewsOpen ? 'Hide reviews' : `Reviews (${displayedReviews.length})`}
+        </button>
+
+        <ul
+          id={reviewsPanelId}
+          hidden={!reviewsOpen}
+          className="flex flex-col gap-2 rounded bg-neutral-950/60 p-2"
+        >
+          {displayedReviews.map((review, i) => (
+            <li key={i} className="break-words text-xs leading-snug">
+              <span className="font-semibold text-neutral-300">
+                {SENTIMENT_LABEL[review.sentiment]}
+              </span>
+              <span className="text-neutral-500"> — {review.author}</span>
+              <p className="text-neutral-400">{review.text}</p>
+            </li>
+          ))}
+        </ul>
 
         <div className="mt-auto flex items-center justify-between gap-2 pt-1">
           <div className="flex flex-col leading-tight">

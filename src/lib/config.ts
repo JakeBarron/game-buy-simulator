@@ -1,7 +1,9 @@
 // Tuning constants for Game Buy Simulator.
 // See specs/001-game-buy-simulator/data-model.md for the reference values.
 
-export const SCHEMA_VERSION = 3;
+// Bumped for Task 5: RunState gained nextReappraisalAt, earlyAdopterBonuses,
+// reappraisalHistory, and marketRatingOverrides — an old save doesn't have them.
+export const SCHEMA_VERSION = 6;
 // Tuned by play (T051). The starting catalogue costs 1253 hours at cheapest
 // prices, so the original 1500-hour start let the player buy everything before
 // ever working - the loop never engaged. 600 forces work early while leaving
@@ -18,6 +20,13 @@ export const WAGE = 150;
 export const MIN_PRICE = 1;
 export const TICK_MS = 100;
 export const ANNOUNCEMENT_MS = 6000;
+/**
+ * Elapsed ms for a store's base inflation to double (`inflationMultiplier` in
+ * inflation.ts): 2 ** (storeRate * elapsedMs / INFLATION_DOUBLING_MS). A
+ * storefront's `inflationRate` scales the exponent, so a faster store
+ * doubles proportionally sooner than this baseline. Task 7 will tune this.
+ */
+export const INFLATION_DOUBLING_MS = 150_000;
 
 export type Range = { min: number; max: number };
 
@@ -27,6 +36,24 @@ export const SALE_DISCOUNT_PCT: Range = { min: 15, max: 85 };
 /** Fraction of listings discounted. */
 export const SALE_LISTING_FRACTION: Range = { min: 0.15, max: 0.45 };
 export const RELEASE_INTERVAL_MS: Range = { min: 90_000, max: 210_000 };
+/** How often the crowd changes its mind about a game (Task 5). Roughly every 45-90s of run
+ *  time — frequent enough that a run sees several, rare enough that each one is an event. */
+export const REAPPRAISAL_INTERVAL_MS: Range = { min: 45_000, max: 90_000 };
+/**
+ * Payoff for conviction (Task 5): applied to the GAIN (not the whole score) when the player
+ * already owned a game at the moment it was re-appraised upward — see
+ * valuation.earlyAdopterBonus. 2x means a 3->4 move (curve 8->20, gain 12) credits an owner an
+ * extra 12 points on top of the 12 the curve already gives them, for 24 total. Task 7's to tune.
+ */
+export const EARLY_ADOPTER_MULTIPLIER = 2;
+/**
+ * Franchise-bonus coefficient (Task 6, valuation.franchiseBonus): a fully-owned series of
+ * `size` games (size >= 2 — a size-of-one "series" pays nothing, see franchiseBonusForSize)
+ * pays `FRANCHISE_BONUS_COEFFICIENT * size * (size + 1) / 2` — triangular growth, not
+ * flat-linear, so a four-game set (10x coefficient) is worth meaningfully more than double a
+ * pair (3x coefficient), not just double. Task 7's to tune.
+ */
+export const FRANCHISE_BONUS_COEFFICIENT = 10;
 
 export type Config = {
   SCHEMA_VERSION: number;
@@ -39,11 +66,15 @@ export type Config = {
   MIN_PRICE: number;
   TICK_MS: number;
   ANNOUNCEMENT_MS: number;
+  INFLATION_DOUBLING_MS: number;
   SALE_INTERVAL_MS: Range;
   SALE_DURATION_MS: Range;
   SALE_DISCOUNT_PCT: Range;
   SALE_LISTING_FRACTION: Range;
   RELEASE_INTERVAL_MS: Range;
+  REAPPRAISAL_INTERVAL_MS: Range;
+  EARLY_ADOPTER_MULTIPLIER: number;
+  FRANCHISE_BONUS_COEFFICIENT: number;
 };
 
 const divideRange = (range: Range, factor: number): Range => ({
@@ -74,11 +105,15 @@ export function loadConfig(search: string, isProd: boolean): Config {
     MIN_PRICE,
     TICK_MS,
     ANNOUNCEMENT_MS,
+    INFLATION_DOUBLING_MS,
     SALE_INTERVAL_MS: divideRange(SALE_INTERVAL_MS, factor),
     SALE_DURATION_MS: divideRange(SALE_DURATION_MS, factor),
     SALE_DISCOUNT_PCT,
     SALE_LISTING_FRACTION,
     RELEASE_INTERVAL_MS: divideRange(RELEASE_INTERVAL_MS, factor),
+    REAPPRAISAL_INTERVAL_MS: divideRange(REAPPRAISAL_INTERVAL_MS, factor),
+    EARLY_ADOPTER_MULTIPLIER,
+    FRANCHISE_BONUS_COEFFICIENT,
   };
 }
 

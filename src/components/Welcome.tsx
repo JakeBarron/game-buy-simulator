@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import { CURRENCY, hours } from '../lib/format'
 
 /**
@@ -12,6 +13,15 @@ export function Welcome(props: {
   wage: number
   onDismiss: () => void
 }) {
+  const dismissButtonRef = useRef<HTMLButtonElement>(null)
+
+  // Move focus into the overlay as soon as it opens, so keyboard users land
+  // somewhere sensible instead of wherever focus happened to be when the
+  // background (now inert) went away.
+  useEffect(() => {
+    dismissButtonRef.current?.focus()
+  }, [])
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/95 p-6">
       <div className="max-w-xl w-full">
@@ -49,6 +59,7 @@ export function Welcome(props: {
         </div>
 
         <button
+          ref={dismissButtonRef}
           onClick={props.onDismiss}
           className="mt-8 w-full rounded bg-slate-100 px-6 py-3 text-base font-semibold text-slate-950 transition hover:bg-white"
         >

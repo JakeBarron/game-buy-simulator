@@ -4,27 +4,27 @@ export function HoursHeader(props: {
   shiftRemainingMs: number | null;
   spacingOut: boolean;
   drainPerSecond: number;
-  owned: number;
-  available: number;
+  /** Collection score — sum of scoreForValue over owned games (valuation.ts). Points, not
+   *  currency, so this is never run through the Ħ formatters in lib/format. */
+  collectionScore: number;
   cannotAffordShift: boolean;
 }) {
   const formatHours = (h: number) => hours(h);
   const formatSeconds = (ms: number) => (ms / 1000).toFixed(1);
-  const progressPercent = props.available > 0 ? (props.owned / props.available) * 100 : 0;
 
   return (
     <header className="w-full bg-slate-950 border-b border-slate-800 px-6 py-4">
       <div className="max-w-7xl mx-auto space-y-4">
         {/* Hours Remaining - Main Display */}
-        <div className="flex items-baseline gap-3">
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
           <div className="text-5xl font-bold font-mono tracking-tight">
             <span className="text-slate-100">{formatHours(props.hoursRemaining)}</span>
           </div>
           <span className="text-slate-400 text-sm">remaining</span>
         </div>
 
-        {/* Shift Status & Collection Progress */}
-        <div className="flex items-center justify-between gap-6">
+        {/* Score & Shift Status */}
+        <div className="flex flex-wrap items-center justify-between gap-6">
           {/* Shift Indicator */}
           <div className="flex-shrink-0">
             {props.shiftRemainingMs !== null ? (
@@ -47,19 +47,15 @@ export function HoursHeader(props: {
             )}
           </div>
 
-          {/* Collection Progress */}
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm text-slate-300 font-mono">
-                {props.owned} / {props.available} owned
-              </span>
-            </div>
-            <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-gradient-to-r from-emerald-600 to-emerald-500 transition-all duration-300"
-                style={{ width: `${progressPercent}%` }}
-              />
-            </div>
+          {/* Collection Score */}
+          <div
+            className="flex flex-shrink-0 items-baseline gap-1.5"
+            aria-label={`Collection score: ${props.collectionScore} points`}
+          >
+            <span className="font-mono text-2xl font-bold text-amber-400">
+              {props.collectionScore}
+            </span>
+            <span className="text-sm text-slate-400">pts</span>
           </div>
         </div>
 

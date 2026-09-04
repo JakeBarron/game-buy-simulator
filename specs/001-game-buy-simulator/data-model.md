@@ -1,3 +1,22 @@
+> **Superseded by the speculation loop (branch `002-speculation-loop`).** This document is the
+> record of what spec 001 specified at the end of the POC; it is not current. In particular:
+> - `RunStatus` is `'playing' | 'dead' | 'pricedOut'`, not `'playing' | 'dead' | 'won'` — there is
+>   no win/completion state (see `contracts/ui-contract.md`'s header note for the same change).
+> - `Game`/`Listing`/`Storefront` gained fields this document doesn't list: `traits`,
+>   `marketRating`, `reviewCount`, `reviews`, and an optional `series` on `Game`; an
+>   `inflationRate` on `Storefront` (each store now inflates its prices at its own rate — see
+>   `src/lib/inflation.ts`). Listing prices are no longer static.
+> - `RunState` grew substantially: `trueValues`, `displayedReviews`, `marketRatingOverrides`,
+>   `earlyAdopterBonuses`, `reappraisalHistory`, `nextReappraisalAt` (the hidden-value/re-appraisal
+>   system, Task 3 and Task 5), plus `welcomeSeen`, `activeStorefrontId`, and `announcements`.
+> - Pricing is no longer just the catalogue's static `price` — see `economy.currentPrice`, which
+>   composes inflation, then sale discount, then a `MIN_PRICE` floor.
+> - Scoring (`valuation.scoreBreakdown`) — collection score plus early-adopter and franchise
+>   bonuses — has no equivalent here at all; it postdates this document.
+>
+> `src/lib/types.ts` is the current source of truth for every shape below. This file is kept as a
+> historical record of spec 001, not updated to track later tasks.
+
 # Phase 1 Data Model: Game Buy Simulator
 
 All types live in `src/lib/types.ts`. Everything is client-side; there is no wire format and no

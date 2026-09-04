@@ -5,6 +5,25 @@
 // Static catalogue data (src/data/catalogue.ts, never mutated)
 // ---------------------------------------------------------------------------
 
+/** Blurb archetype tags. The tell a player reads alongside rating/review count. */
+export type GameTrait =
+  | 'contemplative'
+  | 'asset-flip'
+  | 'annual-sequel'
+  | 'early-access'
+  | 'cult'
+  | 'hype'
+  | 'grind'
+  | 'prestige';
+
+export type ReviewSentiment = 'glowing' | 'positive' | 'mixed' | 'negative' | 'damning';
+
+export type Review = {
+  sentiment: ReviewSentiment;
+  text: string;
+  author: string;
+};
+
 export type Game = {
   id: string;
   title: string;
@@ -13,6 +32,19 @@ export type Game = {
   basePrice: number;
   /** true = held back for mid-run release (FR-045), absent from the starting catalogue. */
   releasePool?: boolean;
+  /** 1-3 blurb archetype tags; must match what the blurb implies. */
+  traits: GameTrait[];
+  /** Crowd's average opinion, 1-5, integer. Visible; drives sale frequency later. */
+  marketRating: number;
+  /** How much to trust marketRating — a rating with few reviews is noise. */
+  reviewCount: number;
+  /**
+   * POOL of 5-8 authored reviews spanning sentiments, not the reviews shown.
+   * A run selects a stable slice for display (Task 3+ selects per-run).
+   */
+  reviews: Review[];
+  /** Franchise id, only for games that belong to one implied sequel/series. */
+  series?: string;
 };
 
 export type Storefront = {
@@ -26,6 +58,14 @@ export type Storefront = {
     fg: string;
     accent: string;
   };
+  /**
+   * Scales the exponent of this store's inflation (inflation.ts
+   * inflationMultiplier): 1.0 doubles prices exactly every
+   * config.INFLATION_DOUBLING_MS; > 1 compounds faster, < 1 slower. The
+   * strategic axis of the run — cream has the better catalogue but is
+   * running away from you; flat shelf is mostly junk but stays affordable.
+   */
+  inflationRate: number;
 };
 
 export type Listing = {
@@ -116,17 +156,44 @@ export type PurchaseRecord = {
 
 export type Announcement = {
   id: string;
-  kind: 'sale' | 'release';
+  kind: 'sale' | 'release' | 'reappraisal';
   text: string;
   /** Auto-dismiss; also manually dismissible (FR-024). */
   expiresAt: number;
+  /**
+   * Only set for kind 'reappraisal'. Carries just enough of the event for the toast to style
+   * itself distinctly for each of the four owned/unowned x up/down cases without re-deriving
+   * state (Task 5, Part C).
+   */
+  reappraisal?: { owned: boolean; direction: 'up' | 'down' };
+};
+
+// ---------------------------------------------------------------------------
+// Re-appraisal (Task 5): the crowd changes its mind about a game mid-run.
+// ---------------------------------------------------------------------------
+
+/** One re-appraisal event, permanently recorded. Task 6's regret screen reads this list to show
+ *  the player what they passed on and what it became — so it must be sufficient on its own,
+ *  without needing to re-derive anything from trueValues/marketRatingOverrides. */
+export type ReappraisalHistoryEntry = {
+  gameId: string;
+  direction: 'up' | 'down';
+  oldTrueValue: number;
+  newTrueValue: number;
+  oldMarketRating: number;
+  newMarketRating: number;
+  /** Whether the player owned the game at the moment this fired — that's what early-adopter
+   *  bonus eligibility (and Task 6's regret framing) hinges on. */
+  owned: boolean;
+  /** Epoch ms (TICK's `now`). */
+  at: number;
 };
 
 // ---------------------------------------------------------------------------
 // RunState
 // ---------------------------------------------------------------------------
 
-export type RunStatus = 'playing' | 'dead' | 'won';
+export type RunStatus = 'playing' | 'dead' | 'pricedOut';
 
 export type RunState = {
   /** Mismatch on load => discard save, fresh run. */
@@ -137,6 +204,17 @@ export type RunState = {
   /** Epoch ms. Used for run-length stats. */
   startedAt: number;
   ownedGameIds: string[];
+  /**
+   * Every game's hidden true value (1-5), rolled once at run start and never rerolled. Never
+   * shown for an unowned game — see valuation.ts.
+   */
+  trueValues: Record<string, number>;
+  /**
+   * Per-run selection of which reviews from each game's authored pool are on display, rolled
+   * once at run start alongside `trueValues` so both stay stable across re-renders and reloads
+   * — rerolling either would silently invalidate every bet the player has made.
+   */
+  displayedReviews: Record<string, Review[]>;
   /** Chronological, append-only. */
   history: PurchaseRecord[];
   /** Completed shifts only. */
@@ -155,6 +233,25 @@ export type RunState = {
   nextSaleAt: number;
   /** Epoch ms of the next release roll. */
   nextReleaseAt: number;
+  /** Epoch ms of the next re-appraisal roll (Task 5). */
+  nextReappraisalAt: number;
+  /**
+   * Per-run override of a game's visible marketRating (catalogue.ts's Game is static, immutable
+   * module data — this is where a re-appraisal's crowd-rating change actually lives). Sparse:
+   * a game with no entry here still shows its catalogue marketRating. Every reader of
+   * marketRating for display or sale weighting must resolve through this, not the raw catalogue
+   * value.
+   */
+  marketRatingOverrides: Record<string, number>;
+  /**
+   * Accumulated early-adopter bonus per game (valuation.earlyAdopterBonus), banked the moment
+   * each qualifying upward re-appraisal fires and never removed — a later downward re-appraisal
+   * of the same game does not claw back a bonus already earned. Added to scoreForValue in
+   * collectionScore.
+   */
+  earlyAdopterBonuses: Record<string, number>;
+  /** Chronological, append-only. See ReappraisalHistoryEntry. */
+  reappraisalHistory: ReappraisalHistoryEntry[];
   /** Set when status leaves 'playing'. */
   endedAt: number | null;
   /** False until the player dismisses the opening screen. Persisted so it
@@ -181,4 +278,4 @@ export type GameAction =
   | { type: 'DISMISS_ANNOUNCEMENT'; id: string }
   | { type: 'SET_STOREFRONT'; storefrontId: string }
   | { type: 'DISMISS_WELCOME' }
-  | { type: 'RESTART'; now: number };
+  | { type: 'RESTART'; now: number; rand: () => number };

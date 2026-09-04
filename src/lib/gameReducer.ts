@@ -10,14 +10,27 @@
 // replayable (including "resolve a shift that finished while the tab was
 // closed") and testable without mocking global state.
 
-import type { RunState, GameAction, Shift, Sale, Announcement, PurchaseRecord, Listing } from './types';
+import type {
+  RunState, GameAction, Shift, Sale, Announcement, PurchaseRecord, Listing, Review,
+  ReappraisalHistoryEntry,
+} from './types';
 import type { Config, Range } from './config';
 import { shiftProgress, shiftDrain, accrueBonus } from './timeEngine';
-import { currentPrice, discountFor, isOwned, hasWon, availableListings } from './economy';
+import {
+  currentPrice, discountFor, isOwned, isPricedOut, availableListings, availableGameIds, gameById,
+  effectiveMarketRating,
+} from './economy';
+import {
+  rollAllTrueValues, selectReviews, pickReappraisalTarget, applyReappraisal, earlyAdopterBonus,
+} from './valuation';
 import { GAMES, LISTINGS, STOREFRONTS, SALE_NAMES } from '../data/catalogue';
 import { checkAnswer } from './puzzles';
 
 const LISTINGS_BY_ID = new Map<string, Listing>(LISTINGS.map((l) => [l.id, l]));
+
+/** How many of a game's authored reviews are on display for the run. Matches what the card UI
+ *  shows (GameCard) — kept here, next to the roll, rather than duplicated at the call site. */
+const DISPLAYED_REVIEWS_COUNT = 3;
 
 // ---------------------------------------------------------------------------
 // Small pure helpers
@@ -37,26 +50,68 @@ function pickIndex<T>(items: T[], rand: () => number): T {
   return items[index];
 }
 
-function shuffleWithRand<T>(items: T[], rand: () => number): T[] {
-  const result = [...items];
-  for (let i = result.length - 1; i > 0; i--) {
-    const j = Math.floor(rand() * (i + 1));
-    [result[i], result[j]] = [result[j], result[i]];
-  }
-  return result;
+/**
+ * Weight a listing inversely to its game's marketRating: a 5* game is
+ * markedly less likely to be chosen for a sale than a 1* game. Squaring the
+ * (6 - rating) spread makes that skew pronounced rather than mild — a 1*
+ * game is 25x as likely to be picked as a 5* game, all else equal.
+ *
+ * Uses `effectiveMarketRating`, not the raw catalogue value — a re-appraisal (Task 5) changes
+ * what the crowd currently thinks, and sale weighting must react to that.
+ */
+function saleWeightFor(listing: Listing, state: RunState): number {
+  return (6 - effectiveMarketRating(state, listing.gameId)) ** 2;
+}
+
+/**
+ * Weighted shuffle without replacement (Efraimidis-Spirakis A-Res): each
+ * item gets a key of log(rand()) / weight, and sorting descending by that
+ * key yields a random ordering where higher-weight items tend to sort
+ * first — without ever drawing an item twice. Taking the top N of the
+ * result is then a weighted sample of N distinct items. Entirely driven by
+ * the injected `rand`, so it stays deterministic/replayable like every
+ * other roll in this file.
+ */
+function weightedShuffle<T>(items: T[], weightOf: (item: T) => number, rand: () => number): T[] {
+  return items
+    .map((item) => {
+      const weight = Math.max(weightOf(item), 1e-9);
+      const u = Math.max(rand(), 1e-9); // avoid log(0) = -Infinity
+      return { item, key: Math.log(u) / weight };
+    })
+    .sort((a, b) => b.key - a.key)
+    .map(({ item }) => item);
 }
 
 // ---------------------------------------------------------------------------
 // Initial state
 // ---------------------------------------------------------------------------
 
-export function initialRun(now: number, config: Config): RunState {
+export function initialRun(now: number, config: Config, rand: () => number): RunState {
+  // Rolled ONCE, here, for every game in the catalogue (including unreleased release-pool
+  // games, so they already have a stable value/review-selection the moment they land
+  // mid-run). Both persist verbatim in RunState — see storage.ts and the schema-version bump
+  // in config.ts — so a reload replays the same run rather than rerolling every bet the player
+  // has made.
+  const trueValues = rollAllTrueValues(GAMES, rand);
+  const displayedReviews: Record<string, Review[]> = {};
+  for (const game of GAMES) {
+    displayedReviews[game.id] = selectReviews(
+      game,
+      trueValues[game.id],
+      rand,
+      DISPLAYED_REVIEWS_COUNT,
+    );
+  }
+
   return {
     schemaVersion: config.SCHEMA_VERSION,
     status: 'playing',
     hoursRemaining: config.STARTING_HOURS,
     startedAt: now,
     ownedGameIds: [],
+    trueValues,
+    displayedReviews,
     history: [],
     shiftsWorked: 0,
     hoursDrained: 0,
@@ -70,6 +125,10 @@ export function initialRun(now: number, config: Config): RunState {
     // after this one goes through TICK's `rand`-driven scheduling.
     nextSaleAt: now + rangeMid(config.SALE_INTERVAL_MS),
     nextReleaseAt: now + rangeMid(config.RELEASE_INTERVAL_MS),
+    nextReappraisalAt: now + rangeMid(config.REAPPRAISAL_INTERVAL_MS),
+    marketRatingOverrides: {},
+    earlyAdopterBonuses: {},
+    reappraisalHistory: [],
     endedAt: null,
     welcomeSeen: false,
     activeStorefrontId: STOREFRONTS[0].id,
@@ -87,7 +146,7 @@ function buy(state: RunState, action: Extract<GameAction, { type: 'BUY' }>, conf
   const listing = LISTINGS_BY_ID.get(action.listingId);
   if (!listing || isOwned(state, listing.gameId)) return state;
 
-  const price = currentPrice(listing, state.activeSale, config);
+  const price = currentPrice(listing, state.activeSale, action.now - state.startedAt, config);
   if (price > state.hoursRemaining) return state; // never overdraft
 
   const discountPercent = discountFor(listing, state.activeSale);
@@ -121,14 +180,17 @@ function buy(state: RunState, action: Extract<GameAction, { type: 'BUY' }>, conf
   };
 
   // Re-check terminal states after the purchase. Dead takes priority over
-  // won when a purchase spends the player's exact last hours on the final
-  // unowned game (balance hits 0 counts as game over per spec Edge Cases).
+  // priced-out when a purchase spends the player's exact last hours on the
+  // final unowned game (balance hits 0 counts as game over per spec Edge
+  // Cases). Buying the last available game also empties the unowned set,
+  // which isPricedOut treats as game over too (see its null-price branch) —
+  // the catalogue-exhausted ending.
   if (next.hoursRemaining <= 0) {
     next = { ...next, status: 'dead', hoursRemaining: 0, activeShift: null, endedAt: action.now };
-  } else if (hasWon(next)) {
-    // "Player wins while a shift is still running: the shift stops and the
-    // victory screen takes over" (spec Edge Cases) — applies here too.
-    next = { ...next, status: 'won', activeShift: null, endedAt: action.now };
+  } else if (isPricedOut(next, action.now - next.startedAt, config)) {
+    // A shift still running when the run ends stops immediately (spec Edge
+    // Cases, carried over from the old victory check) — applies here too.
+    next = { ...next, status: 'pricedOut', activeShift: null, endedAt: action.now };
   }
 
   return next;
@@ -199,10 +261,12 @@ function startSale(state: RunState, now: number, rand: () => number, config: Con
     return { ...state, nextSaleAt };
   }
 
-  const shuffled = shuffleWithRand(listings, rand);
+  // Weighted, not uniform: highly-rated games go on sale less often (see
+  // saleWeightFor).
+  const weighted = weightedShuffle(listings, (listing) => saleWeightFor(listing, state), rand);
   const fraction = pickInRange(rand, config.SALE_LISTING_FRACTION);
-  const count = Math.min(shuffled.length, Math.max(1, Math.round(shuffled.length * fraction)));
-  const chosen = shuffled.slice(0, count);
+  const count = Math.min(weighted.length, Math.max(1, Math.round(weighted.length * fraction)));
+  const chosen = weighted.slice(0, count);
 
   const discounts: Record<string, number> = {};
   for (const listing of chosen) {
@@ -253,6 +317,94 @@ function rollRelease(state: RunState, now: number, rand: () => number, config: C
     ...state,
     releasedGameIds: [...state.releasedGameIds, game.id],
     nextReleaseAt,
+    announcements: [...state.announcements, announcement],
+  };
+}
+
+/**
+ * Toast copy for a re-appraisal, in the project's dry deadpan voice. Reads differently along
+ * two independent axes — owned vs. unowned, up vs. down — so all four cells get their own line
+ * (Task 5, Part C) rather than one templated sentence with a swapped verb:
+ *   - owned + up: triumphant, names the bonus.
+ *   - owned + down: grim — a depreciating asset, no bonus to soften it.
+ *   - unowned + up: the one that hurts — passed on it, and it just got pricier.
+ *   - unowned + down: quietly satisfying — dodged that.
+ */
+function reappraisalText(
+  title: string,
+  direction: 'up' | 'down',
+  owned: boolean,
+  bonus: number,
+): string {
+  if (owned && direction === 'up') {
+    return `${title} just got re-rated up. You already own it. +${bonus} pts.`;
+  }
+  if (owned && direction === 'down') {
+    return `${title} just got re-rated down. You already own it.`;
+  }
+  if (!owned && direction === 'up') {
+    return `${title} just got re-rated up. You passed. It's pricier now.`;
+  }
+  return `${title} just got re-rated down. Good thing you skipped it.`;
+}
+
+function rollReappraisal(state: RunState, now: number, rand: () => number, config: Config): RunState {
+  const nextReappraisalAt = now + pickInRange(rand, config.REAPPRAISAL_INTERVAL_MS);
+
+  // Only games the player can currently see are eligible — re-appraising a game still sitting
+  // in the release pool would move numbers nobody can observe yet and could announce a title
+  // that hasn't "released" in-fiction.
+  const availableIds = new Set(availableGameIds(state));
+  const available = GAMES.filter((g) => availableIds.has(g.id));
+  const targetId = pickReappraisalTarget(state, available, rand);
+  if (!targetId) {
+    return { ...state, nextReappraisalAt };
+  }
+
+  const game = gameById(targetId);
+  if (!game) return { ...state, nextReappraisalAt };
+
+  const oldTrueValue = state.trueValues[targetId];
+  const oldMarketRating = state.marketRatingOverrides[targetId] ?? game.marketRating;
+  const { direction, newTrueValue, newMarketRating } = applyReappraisal(
+    game,
+    oldTrueValue,
+    oldMarketRating,
+    rand,
+  );
+
+  const owned = isOwned(state, targetId);
+  const bonus = earlyAdopterBonus(oldTrueValue, newTrueValue, owned, config.EARLY_ADOPTER_MULTIPLIER);
+  const earlyAdopterBonuses = bonus > 0
+    ? { ...state.earlyAdopterBonuses, [targetId]: (state.earlyAdopterBonuses[targetId] ?? 0) + bonus }
+    : state.earlyAdopterBonuses;
+
+  const historyEntry: ReappraisalHistoryEntry = {
+    gameId: targetId,
+    direction,
+    oldTrueValue,
+    newTrueValue,
+    oldMarketRating,
+    newMarketRating,
+    owned,
+    at: now,
+  };
+
+  const announcement: Announcement = {
+    id: `announce-reappraisal-${targetId}-${now}`,
+    kind: 'reappraisal',
+    text: reappraisalText(game.title, direction, owned, bonus),
+    expiresAt: now + config.ANNOUNCEMENT_MS,
+    reappraisal: { owned, direction },
+  };
+
+  return {
+    ...state,
+    trueValues: { ...state.trueValues, [targetId]: newTrueValue },
+    marketRatingOverrides: { ...state.marketRatingOverrides, [targetId]: newMarketRating },
+    earlyAdopterBonuses,
+    reappraisalHistory: [...state.reappraisalHistory, historyEntry],
+    nextReappraisalAt,
     announcements: [...state.announcements, announcement],
   };
 }
@@ -355,28 +507,31 @@ function tick(state: RunState, action: Extract<GameAction, { type: 'TICK' }>, co
     next = startSale(next, now, rand, config);
   }
 
-  // --- Steps 6 + 7: release roll, then victory check. -----------------------
+  // --- Steps 6-8: release roll, re-appraisal roll, then priced-out check. ---
   //
-  // `hasWon` is evaluated on `next` BEFORE the release step runs. A release
-  // only ever grows the available-games denominator, so by itself it can
-  // never create a win. But if the player already owned everything entering
-  // this step, a release must not be allowed to land in the same tick —
-  // per spec Edge Cases: "A new game releases at the same moment the player
-  // owns everything: the victory check resolves first, so the player is not
-  // robbed of a win by a race." So: if already won, skip the release
-  // entirely and resolve the win; otherwise roll the release normally and
-  // check for a win afterward (which a release cannot itself trigger, but
-  // this keeps steps 6/7 in the order the contract specifies).
-  const alreadyWon = hasWon(next);
-  if (alreadyWon) {
-    next = { ...next, status: 'won', activeShift: null, endedAt: now };
-  } else {
-    if (now >= next.nextReleaseAt) {
-      next = rollRelease(next, now, rand, config);
-    }
-    if (hasWon(next)) {
-      next = { ...next, status: 'won', activeShift: null, endedAt: now };
-    }
+  // Release runs FIRST, then isPricedOut is evaluated on the result. Unlike
+  // the old victory check, a release here can genuinely save the player: it
+  // grows the unowned set, which can only lower cheapestUnownedPrice, so
+  // rolling it before the check gives a same-tick release its full chance
+  // to pull the player back from the brink rather than being robbed of a
+  // lifeline by ordering. Death-by-drain (step 2) still takes precedence
+  // over this and still pays no wage.
+  if (now >= next.nextReleaseAt) {
+    next = rollRelease(next, now, rand, config);
+  }
+
+  // Re-appraisal (Task 5) also runs before the priced-out check, for the same reason: it must
+  // never be robbed of visibility by ordering. A re-appraisal doesn't change affordability the
+  // way a release can (marketRating/trueValue don't feed isPricedOut), so it can't rescue a run
+  // the way a release can — but placing it here still guarantees that a re-appraisal firing on
+  // the very tick the run ends is recorded and announced in the resulting terminal state, rather
+  // than being computed against a state that's already moved on.
+  if (now >= next.nextReappraisalAt) {
+    next = rollReappraisal(next, now, rand, config);
+  }
+
+  if (isPricedOut(next, now - next.startedAt, config)) {
+    next = { ...next, status: 'pricedOut', activeShift: null, endedAt: now };
   }
 
   return next;
@@ -430,8 +585,10 @@ export function gameReducer(state: RunState, action: GameAction, config: Config)
     case 'RESTART':
       // Carry welcomeSeen across a restart: the player has already read the
       // rules, and re-showing a wall of text every time they start another
-      // life would be tedious rather than atmospheric.
-      return { ...initialRun(action.now, config), welcomeSeen: state.welcomeSeen };
+      // life would be tedious rather than atmospheric. Everything else,
+      // including trueValues/displayedReviews, is rerolled fresh — a new run
+      // is a new set of bets.
+      return { ...initialRun(action.now, config, action.rand), welcomeSeen: state.welcomeSeen };
     default: {
       const exhaustive: never = action;
       return exhaustive;
